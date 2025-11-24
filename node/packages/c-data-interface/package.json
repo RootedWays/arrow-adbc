@@ -1,0 +1,43 @@
+{
+  "name": "node-arrow-c-data",
+  "version": "0.0.1",
+  "description": "Node.js C++ Addon implementing the Apache Arrow C Data Interface, bridging native C/C++ Arrow data to Apache Arrow JS.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "gypfile": false,
+  "scripts": {
+    "install": "cmake-js compile",
+    "build": "cmake-js compile --config Release && npm run build:ts",
+    "build:ts": "tsc",
+    "lint:cpp": "clang-format -i cpp/*.cpp cpp/*.h",
+    "check:cpp": "clang-format --dry-run --Werror cpp/*.cpp cpp/*.h",
+    "test": "npm run build:debug && vitest run",
+    "build:debug": "cmake-js clean && cmake-js compile --config Debug && npm run build:ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/**/*",
+    "build/**/*",
+    "prebuilds/**/*"
+  ],
+  "peerDependencies": {
+    "apache-arrow": "^18.0.0 || ^19.0.0 || ^20.0.0 || ^21.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "apache-arrow": "^21.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.12"
+  },
+  "dependencies": {
+    "bindings": "^1.5.0",
+    "cmake-js": "^7.4.0",
+    "node-addon-api": "^8.5.0"
+  }
+}

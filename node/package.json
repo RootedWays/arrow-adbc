@@ -1,0 +1,24 @@
+{
+  "name": "node-adbc-driver-manager",
+  "private": true,
+  "workspaces": [
+    "packages/c-data-interface",
+    "packages/driver-manager",
+    "packages/driver-manager-napi-rs"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "npm run test --workspaces",
+    "clean": "rm -rf node_modules packages/*/node_modules packages/*/build packages/*/dist packages/*/tsconfig.tsbuildinfo tsconfig.tsbuildinfo",
+    "build:drivers": "../ci/scripts/node_build.sh dist/drivers"
+  },
+  "dependencies": {
+    "apache-arrow": "^21.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

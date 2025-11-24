@@ -128,3 +128,7 @@ target/
 # Meson subproject support
 /c/subprojects/*
 !/c/subprojects/*.wrap
+
+# Node.js
+**/node_modules/
+npm-debug.log

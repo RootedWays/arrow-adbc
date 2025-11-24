@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+packages/*/node_modules/
+packages/*/build/
+packages/*/dist/
+.DS_Store
+.ninja_deps
+.ninja_log
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+*.node
+!packages/

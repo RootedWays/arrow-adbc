@@ -1,0 +1,45 @@
+{
+  "name": "driver-manager",
+  "version": "0.0.1",
+  "description": "Node.js bindings for Arrow Database Connectivity (ADBC)",
+  "keywords": [
+    "arrow",
+    "adbc",
+    "sql",
+    "driver"
+  ],
+  "author": "Apache Arrow Developers",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/**/*",
+    "build/**/*",
+    "prebuilds/**/*"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "install": "cmake-js compile"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.3.0",
+    "node-arrow-c-data": "file:../c-data-interface"
+  },
+  "peerDependencies": {
+    "apache-arrow": "^21.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "apache-arrow": "^21.1.0",
+    "cmake-js": "^7.3.0",
+    "prettier": "^3.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.5"
+  }
+}

@@ -1,0 +1,28 @@
+[package]
+name = "driver_manager_napi_rs"
+version = "0.0.1"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "driver_manager_napi_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+adbc_core = { path = "../../../../rust/core" }
+adbc_driver_manager = { path = "../../../../rust/driver_manager" }
+arrow-array = { version = "=55.1.0", default-features = false, features = ["ffi"] }
+arrow-ipc = { version = "=55.1.0", default-features = false }
+arrow-schema = { version = "=55.1.0", default-features = false }
+napi = { version = "2", default-features = false, features = ["napi8", "tokio_rt"] }
+napi-derive = "2"
+
+[patch.crates-io]
+arrow-array = { git = "https://github.com/apache/arrow-rs.git", tag = "55.1.0" }
+arrow-buffer = { git = "https://github.com/apache/arrow-rs.git", tag = "55.1.0" }
+arrow-data = { git = "https://github.com/apache/arrow-rs.git", tag = "55.1.0" }
+arrow-ipc = { git = "https://github.com/apache/arrow-rs.git", tag = "55.1.0" }
+arrow-schema = { git = "https://github.com/apache/arrow-rs.git", tag = "55.1.0" }
+arrow-select = { git = "https://github.com/apache/arrow-rs.git", tag = "55.1.0" }
