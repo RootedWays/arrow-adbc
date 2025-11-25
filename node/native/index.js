@@ -572,4 +572,6 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
-module.exports.plus100 = nativeBinding.plus100
+module.exports.AdbcConnection = nativeBinding.AdbcConnection
+module.exports.AdbcDatabase = nativeBinding.AdbcDatabase
+module.exports.AdbcStatement = nativeBinding.AdbcStatement
