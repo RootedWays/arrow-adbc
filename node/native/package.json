@@ -47,6 +47,7 @@
     "bench": "node --import @oxc-node/core/register benchmark/bench.ts",
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
+    "build:driver": "../../ci/scripts/node_build.sh $(pwd)/build",
     "format": "run-p format:prettier format:rs format:toml",
     "format:prettier": "prettier . -w",
     "format:toml": "taplo format",
@@ -106,5 +107,8 @@
     "trailingComma": "all",
     "singleQuote": true,
     "arrowParens": "always"
+  },
+  "dependencies": {
+    "apache-arrow": "^21.1.0"
   }
 }
