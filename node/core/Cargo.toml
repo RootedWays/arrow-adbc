@@ -1,0 +1,15 @@
+[package]
+name = "adbc_client"
+version = "0.1.0"
+description = "Shared ADBC client logic for bindings"
+edition = "2021"
+authors = ["Apache Arrow <dev@arrow.apache.org>"]
+license = "Apache-2.0"
+
+[dependencies]
+adbc_core = { path = "../../rust/core" }
+adbc_driver_manager = { path = "../../rust/driver_manager" }
+arrow-array = { version = ">=53.1.0, <58", default-features = false, features = ["ffi"] }
+arrow-ipc = { version = ">=53.1.0, <58" }
+arrow-schema = { version = ">=53.1.0, <58" }
+thiserror = "1.0"
