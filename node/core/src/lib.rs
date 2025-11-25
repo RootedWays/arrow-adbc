@@ -15,12 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use adbc_core::{
-    options::{AdbcVersion, OptionConnection, OptionDatabase, OptionStatement, OptionValue},
+    options::{AdbcVersion, InfoCode, ObjectDepth, OptionConnection, OptionDatabase, OptionStatement, OptionValue},
     Connection, Database, Driver, LoadFlags, Statement, Optionable, LOAD_FLAG_DEFAULT,
 };
 use adbc_driver_manager::{ManagedConnection, ManagedDatabase, ManagedDriver, ManagedStatement};
@@ -46,6 +46,15 @@ pub struct ConnectOptions {
     pub search_paths: Option<Vec<String>>,
     pub load_flags: Option<u32>,
     pub database_options: Option<HashMap<String, String>>,
+}
+
+pub struct GetObjectsOptions {
+    pub depth: i32,
+    pub catalog: Option<String>,
+    pub db_schema: Option<String>,
+    pub table_name: Option<String>,
+    pub table_type: Option<Vec<String>>,
+    pub column_name: Option<String>,
 }
 
 pub struct _AdbcDatabaseCore {
@@ -100,6 +109,80 @@ impl _AdbcConnectionCore {
         let stmt = conn.new_statement()?;
         Ok(_AdbcStatementCore { inner: stmt })
     }
+
+    pub fn get_objects(&self, opts: GetObjectsOptions) -> Result<_AdbcConnectionResultIteratorCore> {
+        let conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
+        let depth = match opts.depth {
+            0 => ObjectDepth::All,
+            1 => ObjectDepth::Catalogs,
+            2 => ObjectDepth::Schemas,
+            3 => ObjectDepth::Tables,
+            4 => ObjectDepth::Columns,
+            _ => ObjectDepth::All,
+        };
+        
+        let table_types_str: Option<Vec<&str>> = opts.table_type.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+
+        let reader = conn.get_objects(
+            depth,
+            opts.catalog.as_deref(),
+            opts.db_schema.as_deref(),
+            opts.table_name.as_deref(),
+            table_types_str,
+            opts.column_name.as_deref(),
+        )?;
+
+        let reader: Box<dyn RecordBatchReader + Send> = unsafe {
+            std::mem::transmute(Box::new(reader) as Box<dyn RecordBatchReader + Send>)
+        };
+
+        Ok(_AdbcConnectionResultIteratorCore {
+            reader,
+            _connection: conn.clone(),
+            schema: None,
+        })
+    }
+
+    pub fn get_table_schema(&self, catalog: Option<String>, db_schema: Option<String>, table_name: String) -> Result<Vec<u8>> {
+        let conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
+        let schema = conn.get_table_schema(catalog.as_deref(), db_schema.as_deref(), &table_name)?;
+        
+        let mut output = Vec::new();
+        let _writer = StreamWriter::try_new(&mut output, &schema)?;
+        Ok(output)
+    }
+
+    pub fn get_table_types(&self) -> Result<_AdbcConnectionResultIteratorCore> {
+        let conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
+        let reader = conn.get_table_types()?;
+        
+        let reader: Box<dyn RecordBatchReader + Send> = unsafe {
+            std::mem::transmute(Box::new(reader) as Box<dyn RecordBatchReader + Send>)
+        };
+
+        Ok(_AdbcConnectionResultIteratorCore {
+            reader,
+            _connection: conn.clone(),
+            schema: None,
+        })
+    }
+
+    pub fn get_info(&self, _info_codes: Option<Vec<u32>>) -> Result<_AdbcConnectionResultIteratorCore> {
+        let conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
+        // TODO: Fix InfoCode conversion from u32
+        let codes = None; 
+        let reader = conn.get_info(codes)?;
+
+        let reader: Box<dyn RecordBatchReader + Send> = unsafe {
+            std::mem::transmute(Box::new(reader) as Box<dyn RecordBatchReader + Send>)
+        };
+
+        Ok(_AdbcConnectionResultIteratorCore {
+            reader,
+            _connection: conn.clone(),
+            schema: None,
+        })
+    }
 }
 
 pub struct _AdbcStatementCore {
@@ -113,7 +196,6 @@ impl _AdbcStatementCore {
     }
 
     pub fn set_option(&mut self, key: &str, value: &str) -> Result<()> {
-        // Only string options supported for basic implementation
         self.inner.set_option(OptionStatement::Other(key.to_string()), OptionValue::String(value.to_string()))?;
         Ok(())
     }
@@ -121,8 +203,6 @@ impl _AdbcStatementCore {
     pub fn execute_query(&mut self) -> Result<_AdbcStatementIteratorCore> {
         let reader = self.inner.execute()?;
         
-        // SAFETY: See previous explanation. 
-        // We clone the statement (which is an Arc internally) to keep it alive in the iterator.
         let reader: Box<dyn RecordBatchReader + Send> = unsafe {
             std::mem::transmute(Box::new(reader) as Box<dyn RecordBatchReader + Send>)
         };
@@ -143,11 +223,6 @@ impl _AdbcStatementCore {
         let mut reader = StreamReader::try_new(std::io::Cursor::new(c_data), None)
             .map_err(|e| ClientError::Arrow(e))?;
         
-        // We expect exactly one batch for binding parameters/ingestion usually, 
-        // but ADBC allows binding a stream. 
-        // ManagedStatement::bind takes a RecordBatch.
-        // So we take the first batch.
-        
         if let Some(batch_result) = reader.next() {
             let batch = batch_result.map_err(|e| ClientError::Arrow(e))?;
             self.inner.bind(batch)?;
@@ -163,6 +238,32 @@ pub struct _AdbcStatementIteratorCore {
 }
 
 impl _AdbcStatementIteratorCore {
+    pub fn next(&mut self) -> Result<Option<Vec<u8>>> {
+        if self.schema.is_none() {
+            self.schema = Some(self.reader.schema());
+        }
+        
+        match self.reader.next() {
+            Some(Ok(batch)) => {
+                let mut output = Vec::new();
+                let mut writer = StreamWriter::try_new(&mut output, self.schema.as_ref().unwrap())?;
+                writer.write(&batch)?;
+                writer.finish()?;
+                Ok(Some(output))
+            }
+            Some(Err(e)) => Err(ClientError::Arrow(e)),
+            None => Ok(None),
+        }
+    }
+}
+
+pub struct _AdbcConnectionResultIteratorCore {
+    reader: Box<dyn RecordBatchReader + Send>,
+    _connection: ManagedConnection,
+    schema: Option<Arc<arrow_schema::Schema>>,
+}
+
+impl _AdbcConnectionResultIteratorCore {
     pub fn next(&mut self) -> Result<Option<Vec<u8>>> {
         if self.schema.is_none() {
             self.schema = Some(self.reader.schema());
