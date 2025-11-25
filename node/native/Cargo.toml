@@ -28,10 +28,11 @@ path = "src/lib.rs"
 [dependencies]
 napi = "3.0.0"
 napi-derive = "3.0.0"
-adbc_driver_manager = { path = "../../rust/driver_manager" }
-adbc_core = { path = "../../rust/core" }
-arrow-array = { version = ">=53.1.0, <58", features = ["ffi"] }
-arrow-schema = { version = ">=53.1.0, <58" }
+adbc_client = { path = "../core" }
+adbc_core = { path = "../../rust/core" } # Still needed for LoadFlags/AdbcVersion if exposed
+adbc_driver_manager = { path = "../../rust/driver_manager" } # Needed for ManagedDriver check
+
+
 
 [build-dependencies]
 napi-build = "2"

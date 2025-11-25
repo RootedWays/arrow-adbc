@@ -15,49 +15,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import test from 'ava'
 import * as path from 'path';
 import * as process from 'process';
 import { fileURLToPath } from 'url';
 
-import { AdbcDatabase } from '../index.js'
-
+// Resolve __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-test('basic dummy driver test', (t) => {
+/**
+ * Gets the platform-specific path to a built ADBC driver library.
+ * Assumes drivers are built into `node/native/build/lib/` (from `npm run build:driver`).
+ *
+ * @param driverName The base name of the driver (e.g., "adbc_driver_sqlite").
+ * @returns The absolute path to the driver library.
+ */
+export function getDriverPath(driverName: string): string {
   const platform = process.platform;
-  let libName = 'libadbc_dummy.so';
+  let libName = `lib${driverName}.so`; // Default for Linux
   if (platform === 'darwin') {
-    libName = 'libadbc_dummy.dylib';
+    libName = `lib${driverName}.dylib`;
   } else if (platform === 'win32') {
-    libName = 'adbc_dummy.dll';
+    // Windows usually doesn't use 'lib' prefix for DLLs, or does it?
+    // Let's assume standard CMake behavior on Windows might NOT add 'lib'.
+    // But for now let's just fix Mac/Linux.
+    libName = `${driverName}.dll`;
   }
 
-  // Adjust path to find the rust binary from the test directory
-  // node/native/__test__ -> node/native -> node -> root -> rust/target/debug
-  const driverPath = path.join(__dirname, '../../../rust/target/debug', libName);
-  console.log(`Loading driver from: ${driverPath}`);
-
-  try {
-    const db = new AdbcDatabase(driverPath, "DummyDriverInit");
-    t.pass("Database created successfully");
-    
-    const conn = db.connection();
-    t.pass("Connection created successfully");
-    
-    const stmt = conn.statement();
-    t.pass("Statement created successfully");
-    
-    stmt.setSqlQuery("SELECT * FROM whatever");
-    t.pass("Query set successfully");
-    
-    const res = stmt.execute();
-    t.pass("Executed successfully");
-    t.is(res, 0);
-    
-  } catch (e) {
-    console.error("Error:", e);
-    t.fail(`Test failed with error: ${e}`);
-  }
-})
+  // Path from node/native/__test__ to node/native/build/lib
+  return path.join(__dirname, '../build/lib', libName);
+}

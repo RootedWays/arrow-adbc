@@ -16,45 +16,49 @@
 // under the License.
 
 import test from 'ava'
-import * as path from 'path';
-import * as process from 'process';
-import { fileURLToPath } from 'url';
+import { getDriverPath } from './test_utils';
 
-import { AdbcDatabase } from '../index.js'
+// Import the factory function
+import { createDatabase } from '../lib/index.ts'
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-test('sqlite driver test', (t) => {
-  const platform = process.platform;
-  let libName = 'libadbc_driver_sqlite.so';
-  if (platform === 'darwin') {
-    libName = 'libadbc_driver_sqlite.dylib';
-  } else if (platform === 'win32') {
-    libName = 'adbc_driver_sqlite.dll';
-  }
-
-  // Points to the build output from `npm run build:driver`
-  // node/native/__test__ -> node/native -> build/lib
-  const driverPath = path.join(__dirname, '../build/lib', libName);
+test('sqlite driver test with high-level client', async (t) => {
+  const driverPath = getDriverPath("adbc_driver_sqlite");
   console.log(`Loading driver from: ${driverPath}`);
 
   try {
-    const db = new AdbcDatabase(driverPath, "AdbcDriverSQLiteInit");
-    t.pass("Database created successfully");
+    // 1. Create Database
+    const database = createDatabase({
+        driver: driverPath,
+        entrypoint: "AdbcDriverSQLiteInit"
+    });
     
-    const conn = db.connection();
-    t.pass("Connection created successfully");
+    // 2. Connect
+    const connection = await database.connect();
+    t.pass("Connected successfully");
     
-    const stmt = conn.statement();
-    t.pass("Statement created successfully");
+    // 3. Create Statement
+    const statement = await connection.createStatement();
+    t.pass("Created statement");
+
+    // 4. Execute Query
+    await statement.setSqlQuery("SELECT 1 as val");
+    const reader = await statement.executeQuery();
+    t.pass("Executed query successfully");
     
-    stmt.setSqlQuery("SELECT 1");
-    t.pass("Query set successfully");
-    
-    const res = stmt.execute();
-    t.pass("Executed successfully");
-    t.is(res, 0);
+    let rowCount = 0;
+    for await (const batch of reader) {
+        t.pass(`Read batch with ${batch.numRows} rows`);
+        rowCount += batch.numRows;
+        const valVector = batch.getChild("val");
+        t.is(valVector?.get(0), 1n);
+    }
+
+    t.is(rowCount, 1);
+    t.pass("Finished iterating batches");
+
+    await statement.close();
+    await connection.close();
+    await database.close();
     
   } catch (e) {
     console.error("Error:", e);

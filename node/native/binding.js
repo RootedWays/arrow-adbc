@@ -572,6 +572,14 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
-module.exports.AdbcConnection = nativeBinding.AdbcConnection
-module.exports.AdbcDatabase = nativeBinding.AdbcDatabase
-module.exports.AdbcStatement = nativeBinding.AdbcStatement
+module.exports.NativeAdbcConnection = nativeBinding.NativeAdbcConnection
+module.exports._NativeAdbcConnection = nativeBinding._NativeAdbcConnection
+module.exports.NativeAdbcDatabase = nativeBinding.NativeAdbcDatabase
+module.exports._NativeAdbcDatabase = nativeBinding._NativeAdbcDatabase
+module.exports.NativeAdbcStatement = nativeBinding.NativeAdbcStatement
+module.exports._NativeAdbcStatement = nativeBinding._NativeAdbcStatement
+module.exports.NativeAdbcStatementIterator = nativeBinding.NativeAdbcStatementIterator
+module.exports._NativeAdbcStatementIterator = nativeBinding._NativeAdbcStatementIterator
+module.exports.crateVersion = nativeBinding.crateVersion
+module.exports.defaultAdbcVersion = nativeBinding.defaultAdbcVersion
+module.exports.defaultLoadFlags = nativeBinding.defaultLoadFlags
