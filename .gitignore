@@ -128,3 +128,10 @@ target/
 # Meson subproject support
 /c/subprojects/*
 !/c/subprojects/*.wrap
+
+# Node.js specific ignores
+node/**/node_modules/
+node/**/target/
+node/**/dist/
+node/native/*.node
+node/native/build/
