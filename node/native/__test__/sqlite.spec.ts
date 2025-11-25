@@ -18,8 +18,8 @@
 import test from 'ava'
 import { getDriverPath } from './test_utils';
 
-// Import the factory function
-import { createDatabase } from '../lib/index.ts'
+// Import the class directly
+import { AdbcDatabase } from '../lib/index.ts'
 
 test('sqlite driver test with high-level client', async (t) => {
   const driverPath = getDriverPath("adbc_driver_sqlite");
@@ -27,7 +27,7 @@ test('sqlite driver test with high-level client', async (t) => {
 
   try {
     // 1. Create Database
-    const database = createDatabase({
+    const database = new AdbcDatabase({
         driver: driverPath,
         entrypoint: "AdbcDriverSQLiteInit"
     });

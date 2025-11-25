@@ -18,23 +18,23 @@
 import { 
     NativeAdbcDatabase, 
     NativeAdbcConnection, 
-    NativeAdbcStatement
+    NativeAdbcStatement 
 } from '../binding.js';
 
-import type { 
-    AdbcDatabase, 
-    AdbcConnection, 
-    AdbcStatement, 
-    ConnectOptions, 
-    QueryOptions 
+import type {
+    AdbcDatabase as AdbcDatabaseType,
+    AdbcConnection as AdbcConnectionType,
+    AdbcStatement as AdbcStatementType,
+    ConnectOptions,
+    QueryOptions
 } from '../../shared/src/index';
 
-import { RecordBatchReader } from 'apache-arrow';
+import { RecordBatch, RecordBatchReader, Table, tableToIPC } from 'apache-arrow';
 
 // Re-export types
-export type { ConnectOptions, QueryOptions, AdbcDatabase, AdbcConnection, AdbcStatement };
+export type { ConnectOptions, QueryOptions };
 
-export class AdbcDatabaseImpl implements AdbcDatabase {
+export class AdbcDatabase implements AdbcDatabaseType {
     private _inner: NativeAdbcDatabase;
 
     constructor(options: ConnectOptions) {
@@ -42,18 +42,16 @@ export class AdbcDatabaseImpl implements AdbcDatabase {
     }
 
     async connect(): Promise<AdbcConnection> {
-        // TODO: Pass options to connect if needed
-        const connInner = this._inner.connect(null); 
-        return new AdbcConnectionImpl(connInner);
+        const connInner = this._inner.connect(null);
+        return new AdbcConnection(connInner);
     }
 
     async close(): Promise<void> {
-        // Native object doesn't expose close yet, rely on GC/Drop
         return Promise.resolve();
     }
 }
 
-export class AdbcConnectionImpl implements AdbcConnection {
+export class AdbcConnection implements AdbcConnectionType {
     private _inner: NativeAdbcConnection;
 
     constructor(inner: NativeAdbcConnection) {
@@ -62,7 +60,7 @@ export class AdbcConnectionImpl implements AdbcConnection {
 
     async createStatement(): Promise<AdbcStatement> {
         const stmtInner = this._inner.createStatement();
-        return new AdbcStatementImpl(stmtInner);
+        return new AdbcStatement(stmtInner);
     }
 
     async close(): Promise<void> {
@@ -70,7 +68,7 @@ export class AdbcConnectionImpl implements AdbcConnection {
     }
 }
 
-export class AdbcStatementImpl implements AdbcStatement {
+export class AdbcStatement implements AdbcStatementType {
     private _inner: NativeAdbcStatement;
 
     constructor(inner: NativeAdbcStatement) {
@@ -97,7 +95,6 @@ export class AdbcStatementImpl implements AdbcStatement {
                     }
                     yield new Uint8Array(chunk as any);
                 }
-                // iterator.close(); // Native iterator doesn't expose close yet?
             }
         };
 
@@ -108,12 +105,26 @@ export class AdbcStatementImpl implements AdbcStatement {
         return this._inner.executeUpdate();
     }
 
+    async bind(data: RecordBatch | Table): Promise<void> {
+        // Serialize to IPC bytes
+        // tableToIPC works for Table. For RecordBatch, we might need to wrap it in a Table or use RecordBatchStreamWriter manually?
+        // tableToIPC takes Table | RecordBatch[].
+        
+        let table: Table;
+        if (data instanceof Table) {
+            table = data;
+        } else {
+            // Wrap single batch in a Table/list
+            table = new Table(data);
+        }
+
+        const ipcBytes = tableToIPC(table, "stream");
+        // Pass buffer to native
+        // We need to expose bind(buffer) in NativeAdbcStatement
+        this._inner.bind(Buffer.from(ipcBytes));
+    }
+
     async close(): Promise<void> {
         return Promise.resolve();
     }
-}
-
-// Factory function to create a database
-export function createDatabase(options: ConnectOptions): AdbcDatabase {
-    return new AdbcDatabaseImpl(options);
 }

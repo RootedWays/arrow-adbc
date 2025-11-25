@@ -1,4 +1,4 @@
-use adbc_client::{AdbcConnection as CoreConnection, AdbcDatabase as CoreDatabase, AdbcStatement as CoreStatement, AdbcStatementIterator as CoreIterator, ConnectOptions as CoreConnectOptions};
+use adbc_client::{_AdbcConnectionCore as CoreConnection, _AdbcDatabaseCore as CoreDatabase, _AdbcStatementCore as CoreStatement, _AdbcStatementIteratorCore as CoreIterator, ConnectOptions as CoreConnectOptions};
 use adbc_core::{options::AdbcVersion, LoadFlags, LOAD_FLAG_DEFAULT};
 use adbc_driver_manager::ManagedDriver;
 use napi::bindgen_prelude::{AsyncTask, Buffer, Error, Result};
@@ -121,6 +121,12 @@ impl _NativeAdbcStatement {
     pub fn execute_update(&self) -> Result<i64> {
         let mut stmt = self.inner.lock().unwrap();
         stmt.execute_update().map_err(to_napi_err)
+    }
+
+    #[napi]
+    pub fn bind(&self, data: Buffer) -> Result<()> {
+        let mut stmt = self.inner.lock().unwrap();
+        stmt.bind(data.as_ref()).map_err(to_napi_err)
     }
 }
 
