@@ -1,4 +1,4 @@
-use adbc_client::{_AdbcConnectionCore as CoreConnection, _AdbcDatabaseCore as CoreDatabase, _AdbcStatementCore as CoreStatement, _AdbcStatementIteratorCore as CoreIterator, ConnectOptions as CoreConnectOptions};
+use adbc_client::{_AdbcConnectionCore as CoreConnection, _AdbcDatabaseCore as CoreDatabase, _AdbcStatementCore as CoreStatement, _AdbcStatementIteratorCore as CoreIterator, _AdbcConnectionResultIteratorCore as CoreConnectionIterator, ConnectOptions as CoreConnectOptions, GetObjectsOptions as CoreGetObjectsOptions};
 use adbc_core::{options::AdbcVersion, LoadFlags, LOAD_FLAG_DEFAULT};
 use adbc_driver_manager::ManagedDriver;
 use napi::bindgen_prelude::{AsyncTask, Buffer, Error, Result};
@@ -55,6 +55,29 @@ impl From<ConnectOptions> for CoreConnectOptions {
     }
 }
 
+#[napi(object)]
+pub struct GetObjectsOptions {
+    pub depth: i32,
+    pub catalog: Option<String>,
+    pub db_schema: Option<String>,
+    pub table_name: Option<String>,
+    pub table_type: Option<Vec<String>>,
+    pub column_name: Option<String>,
+}
+
+impl From<GetObjectsOptions> for CoreGetObjectsOptions {
+    fn from(opts: GetObjectsOptions) -> Self {
+        Self {
+            depth: opts.depth,
+            catalog: opts.catalog,
+            db_schema: opts.db_schema,
+            table_name: opts.table_name,
+            table_type: opts.table_type,
+            column_name: opts.column_name,
+        }
+    }
+}
+
 // Classes
 
 #[napi]
@@ -88,6 +111,30 @@ impl _NativeAdbcConnection {
     pub fn create_statement(&self) -> Result<_NativeAdbcStatement> {
         let stmt = self.inner.new_statement().map_err(to_napi_err)?;
         Ok(_NativeAdbcStatement { inner: Arc::new(Mutex::new(stmt)) })
+    }
+
+    #[napi]
+    pub fn get_objects(&self, opts: GetObjectsOptions) -> Result<_NativeAdbcConnectionResultIterator> {
+        let iterator = self.inner.get_objects(opts.into()).map_err(to_napi_err)?;
+        Ok(_NativeAdbcConnectionResultIterator { inner: Arc::new(Mutex::new(iterator)) })
+    }
+
+    #[napi]
+    pub fn get_table_schema(&self, catalog: Option<String>, db_schema: Option<String>, table_name: String) -> Result<Buffer> {
+        let schema_bytes = self.inner.get_table_schema(catalog, db_schema, table_name).map_err(to_napi_err)?;
+        Ok(Buffer::from(schema_bytes))
+    }
+
+    #[napi]
+    pub fn get_table_types(&self) -> Result<_NativeAdbcConnectionResultIterator> {
+        let iterator = self.inner.get_table_types().map_err(to_napi_err)?;
+        Ok(_NativeAdbcConnectionResultIterator { inner: Arc::new(Mutex::new(iterator)) })
+    }
+
+    #[napi]
+    pub fn get_info(&self, info_codes: Option<Vec<u32>>) -> Result<_NativeAdbcConnectionResultIterator> {
+        let iterator = self.inner.get_info(info_codes).map_err(to_napi_err)?;
+        Ok(_NativeAdbcConnectionResultIterator { inner: Arc::new(Mutex::new(iterator)) })
     }
 }
 
@@ -159,6 +206,39 @@ impl _NativeAdbcStatementIterator {
     #[napi]
     pub fn next(&self) -> AsyncTask<IteratorNextTask> {
         AsyncTask::new(IteratorNextTask {
+            iterator: self.inner.clone(),
+        })
+    }
+}
+
+pub struct ConnectionIteratorNextTask {
+    iterator: Arc<Mutex<CoreConnectionIterator>>,
+}
+
+impl Task for ConnectionIteratorNextTask {
+    type Output = Option<Vec<u8>>;
+    type JsValue = Option<Buffer>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let mut iterator = self.iterator.lock().map_err(|e| Error::from_reason(e.to_string()))?;
+        iterator.next().map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output.map(Buffer::from))
+    }
+}
+
+#[napi]
+pub struct _NativeAdbcConnectionResultIterator {
+    inner: Arc<Mutex<CoreConnectionIterator>>,
+}
+
+#[napi]
+impl _NativeAdbcConnectionResultIterator {
+    #[napi]
+    pub fn next(&self) -> AsyncTask<ConnectionIteratorNextTask> {
+        AsyncTask::new(ConnectionIteratorNextTask {
             iterator: self.inner.clone(),
         })
     }

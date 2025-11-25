@@ -23,7 +23,6 @@ import { AdbcDatabase } from '../lib/index.ts'
 
 test('sqlite driver test with high-level client', async (t) => {
   const driverPath = getDriverPath("adbc_driver_sqlite");
-  console.log(`Loading driver from: ${driverPath}`);
 
   try {
     // 1. Create Database

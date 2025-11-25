@@ -17,9 +17,9 @@
 
 import test from 'ava';
 import { getDriverPath } from './test_utils';
-import { tableFromArrays, Table } from 'apache-arrow'; // Import Table for Table.from
+import { tableFromArrays } from 'apache-arrow';
 
-import { AdbcDatabase } from '../lib/index';
+import { AdbcDatabase } from '../lib/index.ts';
 
 test('statement: bind and query data', async (t) => {
   const driverPath = getDriverPath("adbc_driver_sqlite");

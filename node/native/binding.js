@@ -574,6 +574,8 @@ if (!nativeBinding) {
 module.exports = nativeBinding
 module.exports.NativeAdbcConnection = nativeBinding.NativeAdbcConnection
 module.exports._NativeAdbcConnection = nativeBinding._NativeAdbcConnection
+module.exports.NativeAdbcConnectionResultIterator = nativeBinding.NativeAdbcConnectionResultIterator
+module.exports._NativeAdbcConnectionResultIterator = nativeBinding._NativeAdbcConnectionResultIterator
 module.exports.NativeAdbcDatabase = nativeBinding.NativeAdbcDatabase
 module.exports._NativeAdbcDatabase = nativeBinding._NativeAdbcDatabase
 module.exports.NativeAdbcStatement = nativeBinding.NativeAdbcStatement

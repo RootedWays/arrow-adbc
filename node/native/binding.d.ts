@@ -2,8 +2,17 @@
 /* eslint-disable */
 export declare class NativeAdbcConnection {
   createStatement(): _NativeAdbcStatement
+  getObjects(opts: GetObjectsOptions): _NativeAdbcConnectionResultIterator
+  getTableSchema(catalog: string | undefined | null, dbSchema: string | undefined | null, tableName: string): Buffer
+  getTableTypes(): _NativeAdbcConnectionResultIterator
+  getInfo(infoCodes?: Array<number> | undefined | null): _NativeAdbcConnectionResultIterator
 }
 export type _NativeAdbcConnection = NativeAdbcConnection
+
+export declare class NativeAdbcConnectionResultIterator {
+  next(): Promise<unknown>
+}
+export type _NativeAdbcConnectionResultIterator = NativeAdbcConnectionResultIterator
 
 export declare class NativeAdbcDatabase {
   constructor(opts: ConnectOptions)
@@ -38,3 +47,12 @@ export declare function crateVersion(): string
 export declare function defaultAdbcVersion(): string
 
 export declare function defaultLoadFlags(): number
+
+export interface GetObjectsOptions {
+  depth: number
+  catalog?: string
+  dbSchema?: string
+  tableName?: string
+  tableType?: Array<string>
+  columnName?: string
+}

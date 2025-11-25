@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { RecordBatch, RecordBatchReader, Table } from 'apache-arrow';
+import { RecordBatch, RecordBatchReader, Table, Schema } from 'apache-arrow';
 
 /** Options for connecting to a driver/database. */
 export interface ConnectOptions {
@@ -37,6 +37,16 @@ export interface QueryOptions {
   statementOptions?: Record<string, string>;
 }
 
+/** Options for getObjects metadata call. */
+export interface GetObjectsOptions {
+  depth?: number;
+  catalog?: string;
+  dbSchema?: string;
+  tableName?: string;
+  tableType?: string[];
+  columnName?: string;
+}
+
 /**
  * Represents an ADBC Database.
  * Holds state shared across connections.
@@ -56,6 +66,18 @@ export interface AdbcConnection {
   /** Create a new statement for executing queries. */
   createStatement(): Promise<AdbcStatement>;
   
+  /** Get a hierarchical view of database objects. */
+  getObjects(options?: GetObjectsOptions): Promise<RecordBatchReader>;
+  
+  /** Get the Arrow schema for a specific table. */
+  getTableSchema(catalog: string | null, dbSchema: string | null, tableName: string): Promise<Schema>;
+  
+  /** Get a list of table types supported by the database. */
+  getTableTypes(): Promise<RecordBatchReader>;
+  
+  /** Get metadata about the driver and database. */
+  getInfo(infoCodes?: number[]): Promise<RecordBatchReader>;
+
   /** Close the connection. */
   close(): Promise<void>;
 }
@@ -87,4 +109,3 @@ export interface AdbcStatement {
   /** Close the statement. */
   close(): Promise<void>;
 }
-
