@@ -111,6 +111,6 @@
     "arrowParens": "always"
   },
   "dependencies": {
-    "apache-arrow": "^21.1.0"
+    "apache-arrow": "^16.0.0"
   }
 }
