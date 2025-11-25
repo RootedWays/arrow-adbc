@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { RecordBatchReader } from 'apache-arrow';
+import { RecordBatch, RecordBatchReader, Table } from 'apache-arrow';
 
 /** Options for connecting to a driver/database. */
 export interface ConnectOptions {
@@ -77,6 +77,12 @@ export interface AdbcStatement {
   
   /** Execute an update (no results). */
   executeUpdate(): Promise<number | bigint>; // Rows affected
+
+  /**
+   * Bind parameters or data for ingestion.
+   * @param data Arrow RecordBatch or Table containing the data to bind.
+   */
+  bind(data: RecordBatch | Table): Promise<void>;
 
   /** Close the statement. */
   close(): Promise<void>;

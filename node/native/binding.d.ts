@@ -16,6 +16,7 @@ export declare class NativeAdbcStatement {
   setOption(key: string, value: string): void
   executeQuery(): _NativeAdbcStatementIterator
   executeUpdate(): number
+  bind(data: Buffer): void
 }
 export type _NativeAdbcStatement = NativeAdbcStatement
 

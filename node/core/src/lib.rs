@@ -25,6 +25,7 @@ use adbc_core::{
 };
 use adbc_driver_manager::{ManagedConnection, ManagedDatabase, ManagedDriver, ManagedStatement};
 use arrow_array::RecordBatchReader;
+use arrow_ipc::reader::StreamReader;
 use arrow_ipc::writer::StreamWriter;
 
 #[derive(Debug, thiserror::Error)]
@@ -47,11 +48,11 @@ pub struct ConnectOptions {
     pub database_options: Option<HashMap<String, String>>,
 }
 
-pub struct AdbcDatabase {
+pub struct _AdbcDatabaseCore {
     inner: ManagedDatabase,
 }
 
-impl AdbcDatabase {
+impl _AdbcDatabaseCore {
     pub fn new(opts: ConnectOptions) -> Result<Self> {
         let version = AdbcVersion::V110;
         let load_flags = opts.load_flags.unwrap_or(LOAD_FLAG_DEFAULT);
@@ -79,33 +80,33 @@ impl AdbcDatabase {
         Ok(Self { inner: database })
     }
 
-    pub fn connect(&self, options: Option<HashMap<String, String>>) -> Result<AdbcConnection> {
+    pub fn connect(&self, options: Option<HashMap<String, String>>) -> Result<_AdbcConnectionCore> {
         let conn = if let Some(opts) = options {
             self.inner.new_connection_with_opts(map_connection_options(opts))?
         } else {
             self.inner.new_connection()?
         };
-        Ok(AdbcConnection { inner: Mutex::new(conn) })
+        Ok(_AdbcConnectionCore { inner: Mutex::new(conn) })
     }
 }
 
-pub struct AdbcConnection {
+pub struct _AdbcConnectionCore {
     inner: Mutex<ManagedConnection>,
 }
 
-impl AdbcConnection {
-    pub fn new_statement(&self) -> Result<AdbcStatement> {
+impl _AdbcConnectionCore {
+    pub fn new_statement(&self) -> Result<_AdbcStatementCore> {
         let mut conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
         let stmt = conn.new_statement()?;
-        Ok(AdbcStatement { inner: stmt })
+        Ok(_AdbcStatementCore { inner: stmt })
     }
 }
 
-pub struct AdbcStatement {
+pub struct _AdbcStatementCore {
     inner: ManagedStatement,
 }
 
-impl AdbcStatement {
+impl _AdbcStatementCore {
     pub fn set_sql_query(&mut self, query: &str) -> Result<()> {
         self.inner.set_sql_query(query)?;
         Ok(())
@@ -117,7 +118,7 @@ impl AdbcStatement {
         Ok(())
     }
 
-    pub fn execute_query(&mut self) -> Result<AdbcStatementIterator> {
+    pub fn execute_query(&mut self) -> Result<_AdbcStatementIteratorCore> {
         let reader = self.inner.execute()?;
         
         // SAFETY: See previous explanation. 
@@ -126,7 +127,7 @@ impl AdbcStatement {
             std::mem::transmute(Box::new(reader) as Box<dyn RecordBatchReader + Send>)
         };
 
-        Ok(AdbcStatementIterator {
+        Ok(_AdbcStatementIteratorCore {
             reader,
             _statement: self.inner.clone(),
             schema: None,
@@ -137,15 +138,31 @@ impl AdbcStatement {
         let rows = self.inner.execute_update()?;
         Ok(rows.unwrap_or(-1))
     }
+
+    pub fn bind(&mut self, c_data: &[u8]) -> Result<()> {
+        let mut reader = StreamReader::try_new(std::io::Cursor::new(c_data), None)
+            .map_err(|e| ClientError::Arrow(e))?;
+        
+        // We expect exactly one batch for binding parameters/ingestion usually, 
+        // but ADBC allows binding a stream. 
+        // ManagedStatement::bind takes a RecordBatch.
+        // So we take the first batch.
+        
+        if let Some(batch_result) = reader.next() {
+            let batch = batch_result.map_err(|e| ClientError::Arrow(e))?;
+            self.inner.bind(batch)?;
+        }
+        Ok(())
+    }
 }
 
-pub struct AdbcStatementIterator {
+pub struct _AdbcStatementIteratorCore {
     reader: Box<dyn RecordBatchReader + Send>,
     _statement: ManagedStatement,
     schema: Option<Arc<arrow_schema::Schema>>,
 }
 
-impl AdbcStatementIterator {
+impl _AdbcStatementIteratorCore {
     pub fn next(&mut self) -> Result<Option<Vec<u8>>> {
         if self.schema.is_none() {
             self.schema = Some(self.reader.schema());
