@@ -1,0 +1,32 @@
+# Source files (Rust) - Needed if building from source, but usually NAPI publishes binaries
+# If we want to allow building from source:
+# !src/
+# !Cargo.toml
+# !build.rs
+
+# Build artifacts
+target/
+build/
+*.node
+!adbc-node.*.node
+
+# Tests and Benchmarks
+__test__/
+benchmark/
+
+# Configs
+tsconfig.json
+.cargo/
+.github/
+.husky/
+rustfmt.toml
+.prettierignore
+.taplo.toml
+
+# TypeScript Source
+lib/
+
+# Derived artifacts (keep these)
+# !dist/
+# !binding.js
+# !binding.d.ts

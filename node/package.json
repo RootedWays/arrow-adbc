@@ -1,0 +1,16 @@
+{
+  "name": "adbc-node-workspace",
+  "private": true,
+  "workspaces": [
+    "native",
+    "shared"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces"
+  },
+  "devDependencies": {
+    "apache-arrow": "^21.1.0",
+    "typescript": "^5.0.0"
+  }
+}
