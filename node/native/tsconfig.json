@@ -10,8 +10,11 @@
     "allowSyntheticDefaultImports": true,
     "outDir": "./dist",
     "declaration": true,
+    "rootDir": "lib",
+    "baseUrl": ".",
     "paths": {
-      "apache-arrow": ["./node_modules/apache-arrow"]
+      "apache-arrow": ["./node_modules/apache-arrow"],
+      "adbc-shared": ["../shared"]
     }
   },
   "include": ["lib"],

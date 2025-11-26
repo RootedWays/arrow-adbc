@@ -1,14 +1,15 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "commonjs",
     "declaration": true,
     "outDir": "./dist",
     "strict": true,
     "esModuleInterop": true,
-    "baseUrl": "..", // Relative to node/
+    "skipLibCheck": true,
+    "baseUrl": "..", // Relative to node/ (workspace root)
     "paths": {
-      "apache-arrow": ["./node_modules/apache-arrow"]
+      "adbc-node": ["native/dist"] // Path to adbc-node's dist/ relative to baseUrl
     }
   },
   "include": ["src"]

@@ -59,6 +59,16 @@ export interface QueryOptions {
   statementOptions?: Record<string, string>;
 }
 
+/** Standard ADBC Info Codes for getInfo. */
+export enum AdbcInfoCode {
+  VendorName = 0,
+  VendorVersion = 1,
+  VendorArrowVersion = 2,
+  DriverName = 3,
+  DriverVersion = 4,
+  DriverArrowVersion = 5,
+}
+
 /** Options for getObjects metadata call. */
 export interface GetObjectsOptions {
   /**

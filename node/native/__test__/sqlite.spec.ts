@@ -65,4 +65,20 @@ test('sqlite driver test with high-level client', async (t) => {
 
 })
 
+test('sqlite driver test with high-level client (buffers)', async (t) => {
+  await withSqlite(async (db, conn, stmt) => {
+    await stmt.setSqlQuery("SELECT 1 as val");
+    
+    // Check that the new method exists and returns buffers
+    const iterator = await stmt.executeQueryWithBuffers();
+    t.pass("Executed query successfully");
 
+    let chunkCount = 0;
+    for await (const chunk of iterator) {
+        t.true(chunk instanceof Uint8Array);
+        chunkCount++;
+    }
+    t.true(chunkCount > 0);
+    t.pass("Finished iterating buffers");
+  });
+})

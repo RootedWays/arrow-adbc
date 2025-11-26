@@ -1,0 +1,35 @@
+{
+  "name": "adbc-http-gateway",
+  "version": "0.0.1",
+  "description": "HTTP Gateway for ADBC Drivers",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "ava"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.0",
+    "adbc-node": "*",
+    "fastify": "^4.26.0",
+    "fastify-plugin": "^5.1.0"
+  },
+  "peerDependencies": {
+    "apache-arrow": "^21.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ava": "^6.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.0.0"
+  },
+  "ava": {
+    "extensions": [
+      "ts"
+    ],
+    "require": [
+      "tsx/cjs"
+    ]
+  }
+}
