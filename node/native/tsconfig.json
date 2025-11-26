@@ -9,7 +9,10 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "outDir": "./dist",
-    "declaration": true
+    "declaration": true,
+    "paths": {
+      "apache-arrow": ["./node_modules/apache-arrow"]
+    }
   },
   "include": ["lib"],
   "exclude": ["node_modules", "bench", "__test__", "src"]

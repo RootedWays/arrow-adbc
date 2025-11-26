@@ -16,26 +16,15 @@
 // under the License.
 
 import test from 'ava';
-import { getDriverPath } from './test_utils';
-import { AdbcDatabase } from '../lib/index.ts';
+import { withSqlite, createTestTable } from './test_utils';
 
 test('metadata: catalog functions', async (t) => {
-  const driverPath = getDriverPath("adbc_driver_sqlite");
-
-  const database = new AdbcDatabase({
-      driver: driverPath,
-      entrypoint: "AdbcDriverSQLiteInit"
-  });
-  const connection = await database.connect();
-  const statement = await connection.createStatement();
-
-  try {
+  await withSqlite(async (db, conn, stmt) => {
     // Setup: Create a table to query metadata about
-    await statement.setSqlQuery("CREATE TABLE metadata_test (id INTEGER PRIMARY KEY, val TEXT)");
-    await statement.executeUpdate();
+    await createTestTable(stmt, "metadata_test");
 
     // 1. getTableTypes
-    const tableTypesReader = await connection.getTableTypes();
+    const tableTypesReader = await conn.getTableTypes();
     let tableTypesCount = 0;
     let foundTableType = false;
     for await (const batch of tableTypesReader) {
@@ -51,17 +40,13 @@ test('metadata: catalog functions', async (t) => {
     t.true(foundTableType, "Should contain 'table' type");
 
     // 2. getTableSchema
-    // SQLite usually puts tables in "main" schema or null/empty catalog.
-    // ADBC SQLite driver behavior: catalog=null, dbSchema="main"? or just table name match?
-    // Let's try with just table name first.
-    const schema = await connection.getTableSchema(null, null, "metadata_test");
+    const schema = await conn.getTableSchema({ catalog: undefined, dbSchema: undefined, tableName: "metadata_test" });
     t.is(schema.fields.length, 2, "Schema should have 2 fields");
     t.is(schema.fields[0].name, "id", "First field should be 'id'");
-    t.is(schema.fields[1].name, "val", "Second field should be 'val'");
+    t.is(schema.fields[1].name, "name", "Second field should be 'name'"); // createTestTable uses 'name'
 
     // 3. getObjects (Tables)
-    // Depth 3 = Tables
-    const objectsReader = await connection.getObjects({
+    const objectsReader = await conn.getObjects({
         depth: 3,
         tableName: "metadata_test",
         tableType: ["table", "view"]
@@ -69,29 +54,16 @@ test('metadata: catalog functions', async (t) => {
     
     let foundTable = false;
     for await (const batch of objectsReader) {
-        // ADBC getObjects structure is complex (nested lists).
-        // For now, just verify we got data back.
-        // Parsing the full hierarchy in JS without helper types is verbose.
-        // We assume if we get rows, it's working.
         if (batch.numRows > 0) foundTable = true;
     }
     t.true(foundTable, "Should find the table in getObjects");
 
     // 4. getInfo
-    const infoReader = await connection.getInfo();
+    const infoReader = await conn.getInfo();
     let foundInfo = false;
     for await (const batch of infoReader) {
         if (batch.numRows > 0) foundInfo = true;
-        // Info has code (uint32) and value (dense union).
     }
     t.true(foundInfo, "Should return driver info");
-
-  } catch (e) {
-    console.error("Error:", e);
-    t.fail(`Test failed with error: ${e}`);
-  } finally {
-    await statement.close();
-    await connection.close();
-    await database.close();
-  }
+  });
 });

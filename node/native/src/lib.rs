@@ -1,7 +1,34 @@
-use adbc_client::{_AdbcConnectionCore as CoreConnection, _AdbcDatabaseCore as CoreDatabase, _AdbcStatementCore as CoreStatement, _AdbcStatementIteratorCore as CoreIterator, _AdbcConnectionResultIteratorCore as CoreConnectionIterator, ConnectOptions as CoreConnectOptions, GetObjectsOptions as CoreGetObjectsOptions};
-use adbc_core::{options::AdbcVersion, LoadFlags, LOAD_FLAG_DEFAULT};
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+use adbc_client::{
+    ConnectOptions as CoreConnectOptions, 
+    GetObjectsOptions as CoreGetObjectsOptions, 
+    GetTableSchemaOptions as CoreGetTableSchemaOptions,
+    QueryOptions as CoreQueryOptions,
+    _AdbcConnectionCore as CoreConnection, 
+    _AdbcConnectionResultIteratorCore as CoreConnectionIterator, 
+    _AdbcDatabaseCore as CoreDatabase, 
+    _AdbcStatementCore as CoreStatement, 
+    _AdbcStatementIteratorCore as CoreIterator
+};
+use adbc_core::{options::AdbcVersion, LoadFlags};
 use adbc_driver_manager::ManagedDriver;
-use napi::bindgen_prelude::{AsyncTask, Buffer, Error, Result};
+use napi::bindgen_prelude::{AsyncTask, Buffer, Error, Result, Status};
 use napi::Task;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -11,6 +38,10 @@ extern crate napi_derive;
 
 fn to_napi_err<E: std::fmt::Display>(err: E) -> Error {
     Error::from_reason(err.to_string())
+}
+
+fn closed_err() -> Error {
+    Error::new(Status::GenericFailure, "Object is closed".to_string())
 }
 
 #[napi]
@@ -56,6 +87,19 @@ impl From<ConnectOptions> for CoreConnectOptions {
 }
 
 #[napi(object)]
+pub struct QueryOptions {
+    pub statement_options: Option<HashMap<String, String>>,
+}
+
+impl From<QueryOptions> for CoreQueryOptions {
+    fn from(opts: QueryOptions) -> Self {
+        Self {
+            statement_options: opts.statement_options,
+        }
+    }
+}
+
+#[napi(object)]
 pub struct GetObjectsOptions {
     pub depth: i32,
     pub catalog: Option<String>,
@@ -78,11 +122,28 @@ impl From<GetObjectsOptions> for CoreGetObjectsOptions {
     }
 }
 
-// Classes
+#[napi(object)]
+pub struct GetTableSchemaOptions {
+    pub catalog: Option<String>,
+    pub db_schema: Option<String>,
+    pub table_name: String,
+}
+
+impl From<GetTableSchemaOptions> for CoreGetTableSchemaOptions {
+    fn from(opts: GetTableSchemaOptions) -> Self {
+        Self {
+            catalog: opts.catalog,
+            db_schema: opts.db_schema,
+            table_name: opts.table_name,
+        }
+    }
+}
+
+// --- Database ---
 
 #[napi]
 pub struct _NativeAdbcDatabase {
-    inner: Arc<CoreDatabase>,
+    inner: Option<Arc<CoreDatabase>>,
 }
 
 #[napi]
@@ -90,94 +151,373 @@ impl _NativeAdbcDatabase {
     #[napi(constructor)]
     pub fn new(opts: ConnectOptions) -> Result<Self> {
         let db = CoreDatabase::new(opts.into()).map_err(to_napi_err)?;
-        Ok(Self { inner: Arc::new(db) })
+        Ok(Self { inner: Some(Arc::new(db)) })
     }
 
     #[napi]
-    pub fn connect(&self, options: Option<HashMap<String, String>>) -> Result<_NativeAdbcConnection> {
-        let conn = self.inner.connect(options).map_err(to_napi_err)?;
-        Ok(_NativeAdbcConnection { inner: Arc::new(conn) })
+    pub fn connect(&self, options: Option<HashMap<String, String>>) -> Result<AsyncTask<ConnectTask>> {
+        let db = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(ConnectTask {
+            database: db.clone(),
+            options,
+        }))
+    }
+
+    #[napi]
+    pub fn close(&mut self) -> Result<()> {
+        self.inner.take();
+        Ok(())
     }
 }
 
+pub struct ConnectTask {
+    database: Arc<CoreDatabase>,
+    options: Option<HashMap<String, String>>,
+}
+
+impl Task for ConnectTask {
+    type Output = CoreConnection;
+    type JsValue = _NativeAdbcConnection;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        self.database.connect(self.options.clone()).map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(_NativeAdbcConnection { inner: Some(Arc::new(output)) })
+    }
+}
+
+// --- Connection ---
+
 #[napi]
 pub struct _NativeAdbcConnection {
-    inner: Arc<CoreConnection>,
+    inner: Option<Arc<CoreConnection>>,
 }
 
 #[napi]
 impl _NativeAdbcConnection {
     #[napi]
-    pub fn create_statement(&self) -> Result<_NativeAdbcStatement> {
-        let stmt = self.inner.new_statement().map_err(to_napi_err)?;
-        Ok(_NativeAdbcStatement { inner: Arc::new(Mutex::new(stmt)) })
+    pub fn create_statement(&self) -> Result<AsyncTask<CreateStatementTask>> {
+        let conn = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(CreateStatementTask {
+            connection: conn.clone(),
+        }))
     }
 
     #[napi]
-    pub fn get_objects(&self, opts: GetObjectsOptions) -> Result<_NativeAdbcConnectionResultIterator> {
-        let iterator = self.inner.get_objects(opts.into()).map_err(to_napi_err)?;
-        Ok(_NativeAdbcConnectionResultIterator { inner: Arc::new(Mutex::new(iterator)) })
+    pub fn set_option(&self, key: String, value: String) -> Result<()> {
+        let conn = self.inner.as_ref().ok_or_else(closed_err)?;
+        conn.set_option(&key, &value).map_err(to_napi_err)
     }
 
     #[napi]
-    pub fn get_table_schema(&self, catalog: Option<String>, db_schema: Option<String>, table_name: String) -> Result<Buffer> {
-        let schema_bytes = self.inner.get_table_schema(catalog, db_schema, table_name).map_err(to_napi_err)?;
-        Ok(Buffer::from(schema_bytes))
+    pub fn get_objects(&self, opts: GetObjectsOptions) -> Result<AsyncTask<GetObjectsTask>> {
+        let conn = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(GetObjectsTask {
+            connection: conn.clone(),
+            options: opts.into(),
+        }))
     }
 
     #[napi]
-    pub fn get_table_types(&self) -> Result<_NativeAdbcConnectionResultIterator> {
-        let iterator = self.inner.get_table_types().map_err(to_napi_err)?;
-        Ok(_NativeAdbcConnectionResultIterator { inner: Arc::new(Mutex::new(iterator)) })
+    pub fn get_table_schema(&self, opts: GetTableSchemaOptions) -> Result<AsyncTask<GetTableSchemaTask>> {
+        let conn = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(GetTableSchemaTask {
+            connection: conn.clone(),
+            options: opts.into(),
+        }))
     }
 
     #[napi]
-    pub fn get_info(&self, info_codes: Option<Vec<u32>>) -> Result<_NativeAdbcConnectionResultIterator> {
-        let iterator = self.inner.get_info(info_codes).map_err(to_napi_err)?;
-        Ok(_NativeAdbcConnectionResultIterator { inner: Arc::new(Mutex::new(iterator)) })
+    pub fn get_table_types(&self) -> Result<AsyncTask<GetTableTypesTask>> {
+        let conn = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(GetTableTypesTask {
+            connection: conn.clone(),
+        }))
+    }
+
+    #[napi]
+    pub fn get_info(&self, info_codes: Option<Vec<u32>>) -> Result<AsyncTask<GetInfoTask>> {
+        let conn = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(GetInfoTask {
+            connection: conn.clone(),
+            info_codes,
+        }))
+    }
+
+    #[napi]
+    pub fn commit(&self) -> Result<AsyncTask<CommitTask>> {
+        let conn = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(CommitTask {
+            connection: conn.clone(),
+        }))
+    }
+
+    #[napi]
+    pub fn rollback(&self) -> Result<AsyncTask<RollbackTask>> {
+        let conn = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(RollbackTask {
+            connection: conn.clone(),
+        }))
+    }
+
+    #[napi]
+    pub fn close(&mut self) -> Result<()> {
+        self.inner.take();
+        Ok(())
     }
 }
 
+pub struct CreateStatementTask {
+    connection: Arc<CoreConnection>,
+}
+
+impl Task for CreateStatementTask {
+    type Output = CoreStatement;
+    type JsValue = _NativeAdbcStatement;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        self.connection.new_statement().map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(_NativeAdbcStatement { inner: Some(Arc::new(Mutex::new(output))) })
+    }
+}
+
+// Metadata Tasks
+
+pub struct GetObjectsTask {
+    connection: Arc<CoreConnection>,
+    options: CoreGetObjectsOptions,
+}
+
+impl Task for GetObjectsTask {
+    type Output = CoreConnectionIterator;
+    type JsValue = _NativeAdbcConnectionResultIterator;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let opts = CoreGetObjectsOptions {
+            depth: self.options.depth,
+            catalog: self.options.catalog.clone(),
+            db_schema: self.options.db_schema.clone(),
+            table_name: self.options.table_name.clone(),
+            table_type: self.options.table_type.clone(),
+            column_name: self.options.column_name.clone(),
+        };
+        self.connection.get_objects(opts).map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(_NativeAdbcConnectionResultIterator { inner: Some(Arc::new(Mutex::new(output))) })
+    }
+}
+
+pub struct GetTableSchemaTask {
+    connection: Arc<CoreConnection>,
+    options: CoreGetTableSchemaOptions,
+}
+
+impl Task for GetTableSchemaTask {
+    type Output = Vec<u8>;
+    type JsValue = Buffer;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let opts = CoreGetTableSchemaOptions {
+            catalog: self.options.catalog.clone(),
+            db_schema: self.options.db_schema.clone(),
+            table_name: self.options.table_name.clone(),
+        };
+        self.connection.get_table_schema(opts).map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(Buffer::from(output))
+    }
+}
+
+pub struct GetTableTypesTask {
+    connection: Arc<CoreConnection>,
+}
+
+impl Task for GetTableTypesTask {
+    type Output = CoreConnectionIterator;
+    type JsValue = _NativeAdbcConnectionResultIterator;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        self.connection.get_table_types().map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(_NativeAdbcConnectionResultIterator { inner: Some(Arc::new(Mutex::new(output))) })
+    }
+}
+
+pub struct GetInfoTask {
+    connection: Arc<CoreConnection>,
+    info_codes: Option<Vec<u32>>,
+}
+
+impl Task for GetInfoTask {
+    type Output = CoreConnectionIterator;
+    type JsValue = _NativeAdbcConnectionResultIterator;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        self.connection.get_info(self.info_codes.clone()).map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(_NativeAdbcConnectionResultIterator { inner: Some(Arc::new(Mutex::new(output))) })
+    }
+}
+
+pub struct CommitTask {
+    connection: Arc<CoreConnection>,
+}
+
+impl Task for CommitTask {
+    type Output = ();
+    type JsValue = ();
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        self.connection.commit().map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> Result<Self::JsValue> {
+        Ok(())
+    }
+}
+
+pub struct RollbackTask {
+    connection: Arc<CoreConnection>,
+}
+
+impl Task for RollbackTask {
+    type Output = ();
+    type JsValue = ();
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        self.connection.rollback().map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> Result<Self::JsValue> {
+        Ok(())
+    }
+}
+
+// --- Statement ---
+
 #[napi]
 pub struct _NativeAdbcStatement {
-    inner: Arc<Mutex<CoreStatement>>,
+    inner: Option<Arc<Mutex<CoreStatement>>>,
 }
 
 #[napi]
 impl _NativeAdbcStatement {
     #[napi]
     pub fn set_sql_query(&self, query: String) -> Result<()> {
-        let mut stmt = self.inner.lock().unwrap();
+        let mutex = self.inner.as_ref().ok_or_else(closed_err)?;
+        let mut stmt = mutex.lock().unwrap();
         stmt.set_sql_query(&query).map_err(to_napi_err)
     }
 
     #[napi]
     pub fn set_option(&self, key: String, value: String) -> Result<()> {
-        let mut stmt = self.inner.lock().unwrap();
+        let mutex = self.inner.as_ref().ok_or_else(closed_err)?;
+        let mut stmt = mutex.lock().unwrap();
         stmt.set_option(&key, &value).map_err(to_napi_err)
     }
 
     #[napi]
-    pub fn execute_query(&self) -> Result<_NativeAdbcStatementIterator> {
-        let mut stmt = self.inner.lock().unwrap();
-        let iterator = stmt.execute_query().map_err(to_napi_err)?;
-        Ok(_NativeAdbcStatementIterator { inner: Arc::new(Mutex::new(iterator)) })
+    pub fn execute_query(&self) -> Result<AsyncTask<ExecuteQueryTask>> {
+        let mutex = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(ExecuteQueryTask {
+            statement: mutex.clone(),
+        }))
     }
 
     #[napi]
-    pub fn execute_update(&self) -> Result<i64> {
-        let mut stmt = self.inner.lock().unwrap();
-        stmt.execute_update().map_err(to_napi_err)
+    pub fn execute_update(&self) -> Result<AsyncTask<ExecuteUpdateTask>> {
+        let mutex = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(ExecuteUpdateTask {
+            statement: mutex.clone(),
+        }))
     }
 
     #[napi]
-    pub fn bind(&self, data: Buffer) -> Result<()> {
-        let mut stmt = self.inner.lock().unwrap();
-        stmt.bind(data.as_ref()).map_err(to_napi_err)
+    pub fn bind(&self, data: Buffer) -> Result<AsyncTask<BindTask>> {
+        let mutex = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(BindTask {
+            statement: mutex.clone(),
+            data: data.to_vec(),
+        }))
+    }
+
+    #[napi]
+    pub fn close(&mut self) -> Result<()> {
+        self.inner.take();
+        Ok(())
     }
 }
 
-// Iterator Task
+pub struct ExecuteQueryTask {
+    statement: Arc<Mutex<CoreStatement>>,
+}
+
+impl Task for ExecuteQueryTask {
+    type Output = CoreIterator;
+    type JsValue = _NativeAdbcStatementIterator;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let mut stmt = self.statement.lock().unwrap();
+        stmt.execute_query().map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(_NativeAdbcStatementIterator { inner: Some(Arc::new(Mutex::new(output))) })
+    }
+}
+
+pub struct ExecuteUpdateTask {
+    statement: Arc<Mutex<CoreStatement>>,
+}
+
+impl Task for ExecuteUpdateTask {
+    type Output = i64;
+    type JsValue = i64;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let mut stmt = self.statement.lock().unwrap();
+        stmt.execute_update().map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+pub struct BindTask {
+    statement: Arc<Mutex<CoreStatement>>,
+    data: Vec<u8>,
+}
+
+impl Task for BindTask {
+    type Output = ();
+    type JsValue = ();
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let mut stmt = self.statement.lock().unwrap();
+        stmt.bind(&self.data).map_err(to_napi_err)
+    }
+
+    fn resolve(&mut self, _env: napi::Env, _output: Self::Output) -> Result<Self::JsValue> {
+        Ok(())
+    }
+}
+
+// --- Iterators ---
+
 pub struct IteratorNextTask {
     iterator: Arc<Mutex<CoreIterator>>,
 }
@@ -198,16 +538,23 @@ impl Task for IteratorNextTask {
 
 #[napi]
 pub struct _NativeAdbcStatementIterator {
-    inner: Arc<Mutex<CoreIterator>>,
+    inner: Option<Arc<Mutex<CoreIterator>>>,
 }
 
 #[napi]
 impl _NativeAdbcStatementIterator {
     #[napi]
-    pub fn next(&self) -> AsyncTask<IteratorNextTask> {
-        AsyncTask::new(IteratorNextTask {
-            iterator: self.inner.clone(),
-        })
+    pub fn next(&self) -> Result<AsyncTask<IteratorNextTask>> {
+        let iterator = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(IteratorNextTask {
+            iterator: iterator.clone(),
+        }))
+    }
+    
+    #[napi]
+    pub fn close(&mut self) -> Result<()> {
+        self.inner.take();
+        Ok(())
     }
 }
 
@@ -231,15 +578,22 @@ impl Task for ConnectionIteratorNextTask {
 
 #[napi]
 pub struct _NativeAdbcConnectionResultIterator {
-    inner: Arc<Mutex<CoreConnectionIterator>>,
+    inner: Option<Arc<Mutex<CoreConnectionIterator>>>,
 }
 
 #[napi]
 impl _NativeAdbcConnectionResultIterator {
     #[napi]
-    pub fn next(&self) -> AsyncTask<ConnectionIteratorNextTask> {
-        AsyncTask::new(ConnectionIteratorNextTask {
-            iterator: self.inner.clone(),
-        })
+    pub fn next(&self) -> Result<AsyncTask<ConnectionIteratorNextTask>> {
+        let iterator = self.inner.as_ref().ok_or_else(closed_err)?;
+        Ok(AsyncTask::new(ConnectionIteratorNextTask {
+            iterator: iterator.clone(),
+        }))
+    }
+
+    #[napi]
+    pub fn close(&mut self) -> Result<()> {
+        self.inner.take();
+        Ok(())
     }
 }

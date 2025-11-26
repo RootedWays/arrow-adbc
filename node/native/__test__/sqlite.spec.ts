@@ -16,51 +16,53 @@
 // under the License.
 
 import test from 'ava'
-import { getDriverPath } from './test_utils';
 
-// Import the class directly
-import { AdbcDatabase } from '../lib/index.ts'
+import { withSqlite } from './test_utils';
+
+
 
 test('sqlite driver test with high-level client', async (t) => {
-  const driverPath = getDriverPath("adbc_driver_sqlite");
 
-  try {
-    // 1. Create Database
-    const database = new AdbcDatabase({
-        driver: driverPath,
-        entrypoint: "AdbcDriverSQLiteInit"
-    });
-    
-    // 2. Connect
-    const connection = await database.connect();
+  await withSqlite(async (db, conn, stmt) => {
+
     t.pass("Connected successfully");
-    
-    // 3. Create Statement
-    const statement = await connection.createStatement();
+
     t.pass("Created statement");
 
+
+
     // 4. Execute Query
-    await statement.setSqlQuery("SELECT 1 as val");
-    const reader = await statement.executeQuery();
+
+    await stmt.setSqlQuery("SELECT 1 as val");
+
+    const reader = await stmt.executeQuery();
+
     t.pass("Executed query successfully");
+
     
+
     let rowCount = 0;
+
     for await (const batch of reader) {
+
         t.pass(`Read batch with ${batch.numRows} rows`);
+
         rowCount += batch.numRows;
+
         const valVector = batch.getChild("val");
+
         t.is(valVector?.get(0), 1n);
+
     }
 
+
+
     t.is(rowCount, 1);
+
     t.pass("Finished iterating batches");
 
-    await statement.close();
-    await connection.close();
-    await database.close();
-    
-  } catch (e) {
-    console.error("Error:", e);
-    t.fail(`Test failed with error: ${e}`);
-  }
+  });
+
 })
+
+

@@ -1,0 +1,138 @@
+name: Node.js Binding
+
+env:
+  DEBUG: napi:*
+  APP_NAME: adbc-node
+  MACOSX_DEPLOYMENT_TARGET: '10.13'
+  CARGO_INCREMENTAL: '1'
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'node/**'
+      - 'rust/**'
+      - '.github/workflows/node.yml'
+  pull_request:
+    paths:
+      - 'node/**'
+      - 'rust/**'
+      - '.github/workflows/node.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: node/package-lock.json
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install dependencies
+        working-directory: node
+        run: npm install
+      - name: Cargo fmt
+        working-directory: node/native
+        run: cargo fmt -- --check
+      - name: Clippy
+        working-directory: node/native
+        run: cargo clippy -- -D warnings
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            build: npm run build -- --target x86_64-apple-darwin
+          - host: windows-latest
+            build: npm run build -- --target x86_64-pc-windows-msvc
+            target: x86_64-pc-windows-msvc
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            build: npm run build -- --target x86_64-unknown-linux-gnu --use-napi-cross
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            build: npm run build -- --target x86_64-unknown-linux-musl -x
+    name: Build ${{ matrix.settings.target }}
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: node/package-lock.json
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.settings.target }}
+      - name: Install dependencies
+        working-directory: node
+        run: npm install
+      - name: Build
+        working-directory: node/native
+        run: ${{ matrix.settings.build }}
+        shell: bash
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: node/native/*.node
+          if-no-files-found: error
+
+  test:
+    name: Test ${{ matrix.settings.target }}
+    needs: build
+    runs-on: ${{ matrix.settings.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: macos-latest
+            target: x86_64-apple-darwin
+          # Windows testing is tricky without proper env setup for sqlite driver build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: node/package-lock.json
+      - name: Install dependencies
+        working-directory: node
+        run: npm install
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: node/native
+      - name: Build Driver
+        # We need to build the SQLite driver for tests. 
+        # This assumes the host has CMake and C++ compiler.
+        working-directory: node/native
+        run: npm run build:driver
+        env:
+          # Point to vendored sqlite for reliable build in CI
+          ADBC_CMAKE_ARGS: "-DSQLite3_INCLUDE_DIR=${{ github.workspace }}/c/vendor/sqlite3"
+      - name: Run Tests
+        working-directory: node/native
+        run: npm test
