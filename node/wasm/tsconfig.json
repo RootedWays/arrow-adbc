@@ -6,9 +6,11 @@
     "outDir": "./dist",
     "strict": true,
     "esModuleInterop": true,
-    "baseUrl": "..", // Relative to node/
+    "skipLibCheck": true,
+    "baseUrl": "..",
     "paths": {
-      "apache-arrow": ["./node_modules/apache-arrow"]
+      "apache-arrow": ["./node_modules/apache-arrow"],
+      "adbc-shared": ["shared"]
     }
   },
   "include": ["src"]

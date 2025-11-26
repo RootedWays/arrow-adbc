@@ -15,36 +15,58 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { 
-    NativeAdbcDatabase, 
-    NativeAdbcConnection, 
-    NativeAdbcStatement, 
-    NativeAdbcStatementIterator 
+import {
+    NativeAdbcDatabase,
+    NativeAdbcConnection,
+    NativeAdbcStatement,
+    NativeAdbcStatementIterator,
+    NativeAdbcConnectionResultIterator
 } from '../binding.js';
 
-import type { 
-    AdbcDatabase as AdbcDatabaseInterface, 
-    AdbcConnection as AdbcConnectionInterface, 
-    AdbcStatement as AdbcStatementInterface, 
-    ConnectOptions, 
+import type {
+    AdbcDatabase as AdbcDatabaseInterface,
+    AdbcConnection as AdbcConnectionInterface,
+    AdbcStatement as AdbcStatementInterface,
+    ConnectOptions,
     QueryOptions,
-    GetObjectsOptions
-} from '../../shared/src/index';
+    GetObjectsOptions,
+} from 'adbc-shared';
+
+import { AdbcInfoCode } from 'adbc-shared';
 
 import { RecordBatchReader, RecordBatch, Table, tableToIPC, Schema } from 'apache-arrow';
 
-// Safely define Symbol.asyncDispose for compatibility with Node.js environments older than v21.
-// This allows the use of `await using` syntax if the environment supports it (e.g., Node.js v21+)
-// or if a polyfill is provided. If the Symbol is not natively available, a unique Symbol is
-// created to prevent runtime errors, though `await using` won't function.
-const asyncDisposeSymbol = (Symbol as any).asyncDispose ?? Symbol('Symbol.asyncDispose');
+// Polyfill Symbol.asyncDispose for Node.js < 20
+// This must run before any class definitions that use it.
+if (!(Symbol as any).asyncDispose) {
+    (Symbol as any).asyncDispose = Symbol.for('Symbol.asyncDispose');
+}
 
 // Export Options types
 export type { ConnectOptions, QueryOptions, GetObjectsOptions };
+export { AdbcInfoCode };
+
+function iteratorToAsyncIterable(iterator: NativeAdbcStatementIterator | NativeAdbcConnectionResultIterator): AsyncIterable<Uint8Array> {
+    return {
+        [Symbol.asyncIterator]: async function* () {
+            try {
+                while (true) {
+                    const chunk = await iterator.next();
+                    if (!chunk) {
+                        break;
+                    }
+                    yield new Uint8Array(chunk as any);
+                }
+            } finally {
+                iterator.close();
+            }
+        }
+    };
+}
 
 /**
  * Represents an ADBC Database.
- * 
+ *
  * An AdbcDatabase represents a handle to a database. This may be a single file (SQLite),
  * a connection configuration (PostgreSQL), or an in-memory database.
  * It holds state that is shared across multiple connections.
@@ -62,7 +84,7 @@ export class AdbcDatabase implements AdbcDatabaseInterface {
      */
     async connect(): Promise<AdbcConnection> {
         // Native connect is async
-        const connInner = await this._inner.connect(null); 
+        const connInner = await this._inner.connect(null);
         // Cast to concrete Native type if TS infers unknown
         return new AdbcConnection(connInner as NativeAdbcConnection);
     }
@@ -77,14 +99,14 @@ export class AdbcDatabase implements AdbcDatabaseInterface {
     /**
      * Release resources when using `await using` syntax.
      */
-    async [asyncDisposeSymbol](): Promise<void> {
+    async [Symbol.asyncDispose](): Promise<void> {
         return this.close();
     }
 }
 
 /**
  * Represents a single connection to a database.
- * 
+ *
  * An AdbcConnection maintains the state of a connection to the database, such as
  * current transaction state and session options.
  */
@@ -135,6 +157,16 @@ export class AdbcConnection implements AdbcConnectionInterface {
      * @returns A RecordBatchReader containing the metadata.
      */
     async getObjects(options?: GetObjectsOptions): Promise<RecordBatchReader> {
+        const iterable = await this.getObjectsWithBuffers(options);
+        return RecordBatchReader.from(iterable);
+    }
+
+    /**
+     * Get a hierarchical view of database objects as raw IPC buffers.
+     * @param options Filtering options.
+     * @returns An AsyncIterable of IPC buffers (Uint8Array).
+     */
+    async getObjectsWithBuffers(options?: GetObjectsOptions): Promise<AsyncIterable<Uint8Array>> {
         const opts = {
             depth: options?.depth ?? 0,
             catalog: options?.catalog,
@@ -144,7 +176,7 @@ export class AdbcConnection implements AdbcConnectionInterface {
             columnName: options?.columnName
         };
         const iterator = await this._inner.getObjects(opts);
-        return this._iteratorToReader(iterator as NativeAdbcStatementIterator);
+        return iteratorToAsyncIterable(iterator as NativeAdbcConnectionResultIterator);
     }
 
     /**
@@ -170,8 +202,17 @@ export class AdbcConnection implements AdbcConnectionInterface {
      * @returns A RecordBatchReader containing table types.
      */
     async getTableTypes(): Promise<RecordBatchReader> {
+        const iterable = await this.getTableTypesWithBuffers();
+        return RecordBatchReader.from(iterable);
+    }
+
+    /**
+     * Get a list of table types supported by the database as raw IPC buffers.
+     * @returns An AsyncIterable of IPC buffers (Uint8Array).
+     */
+    async getTableTypesWithBuffers(): Promise<AsyncIterable<Uint8Array>> {
         const iterator = await this._inner.getTableTypes();
-        return this._iteratorToReader(iterator as NativeAdbcStatementIterator);
+        return iteratorToAsyncIterable(iterator as NativeAdbcConnectionResultIterator);
     }
 
     /**
@@ -180,8 +221,18 @@ export class AdbcConnection implements AdbcConnectionInterface {
      * @returns A RecordBatchReader containing the requested info.
      */
     async getInfo(infoCodes?: number[]): Promise<RecordBatchReader> {
+        const iterable = await this.getInfoWithBuffers(infoCodes);
+        return RecordBatchReader.from(iterable);
+    }
+
+    /**
+     * Get metadata about the driver and database as raw IPC buffers.
+     * @param infoCodes Optional list of integer info codes.
+     * @returns An AsyncIterable of IPC buffers (Uint8Array).
+     */
+    async getInfoWithBuffers(infoCodes?: number[]): Promise<AsyncIterable<Uint8Array>> {
         const iterator = await this._inner.getInfo(infoCodes);
-        return this._iteratorToReader(iterator as NativeAdbcStatementIterator);
+        return iteratorToAsyncIterable(iterator as NativeAdbcConnectionResultIterator);
     }
 
     /**
@@ -208,33 +259,14 @@ export class AdbcConnection implements AdbcConnectionInterface {
     /**
      * Release resources when using `await using` syntax.
      */
-    async [asyncDisposeSymbol](): Promise<void> {
+    async [Symbol.asyncDispose](): Promise<void> {
         return this.close();
-    }
-
-    private async _iteratorToReader(iterator: NativeAdbcStatementIterator): Promise<RecordBatchReader> {
-        const asyncIterable: AsyncIterable<Uint8Array> = {
-            [Symbol.asyncIterator]: async function* () {
-                try {
-                    while (true) {
-                        const chunk = await iterator.next();
-                        if (!chunk) {
-                            break;
-                        }
-                        yield new Uint8Array(chunk as any);
-                    }
-                } finally {
-                    iterator.close();
-                }
-            }
-        };
-        return RecordBatchReader.from(asyncIterable);
     }
 }
 
 /**
  * Represents a query statement.
- * 
+ *
  * An AdbcStatement is used to execute SQL queries or prepare bulk insertions.
  */
 export class AdbcStatement implements AdbcStatementInterface {
@@ -249,8 +281,6 @@ export class AdbcStatement implements AdbcStatementInterface {
      * @param query The SQL query.
      */
     async setSqlQuery(query: string): Promise<void> {
-        // setSqlQuery is sync in native currently? 
-        // Let's check lib.rs. "pub fn set_sql_query" returns Result<()>. It is SYNC.
         this._inner.setSqlQuery(query);
     }
 
@@ -260,7 +290,6 @@ export class AdbcStatement implements AdbcStatementInterface {
      * @param value The option value.
      */
     setOption(key: string, value: string): void {
-        // setOption is sync.
         this._inner.setOption(key, value);
     }
 
@@ -269,30 +298,17 @@ export class AdbcStatement implements AdbcStatementInterface {
      * @returns A Promise resolving to an Apache Arrow RecordBatchReader.
      */
     async executeQuery(): Promise<RecordBatchReader> {
-        // executeQuery IS async (returns AsyncTask)
-        const iterator = await this._inner.executeQuery();
-        
-        // Reuse the logic from Connection? Or duplicate.
-        // We need to handle the iterator type.
-        const nativeIter = iterator as NativeAdbcStatementIterator;
-        
-        const asyncIterable: AsyncIterable<Uint8Array> = {
-            [Symbol.asyncIterator]: async function* () {
-                try {
-                    while (true) {
-                        const chunk = await nativeIter.next();
-                        if (!chunk) {
-                            break;
-                        }
-                        yield new Uint8Array(chunk as any);
-                    }
-                } finally {
-                    nativeIter.close();
-                }
-            }
-        };
+        const iterable = await this.executeQueryWithBuffers();
+        return RecordBatchReader.from(iterable);
+    }
 
-        return RecordBatchReader.from(asyncIterable);
+    /**
+     * Execute the query and return a stream of raw IPC buffers.
+     * @returns A Promise resolving to an AsyncIterable of IPC buffers (Uint8Array).
+     */
+    async executeQueryWithBuffers(): Promise<AsyncIterable<Uint8Array>> {
+        const iterator = await this._inner.executeQuery();
+        return iteratorToAsyncIterable(iterator as NativeAdbcStatementIterator);
     }
 
     /**
@@ -300,7 +316,6 @@ export class AdbcStatement implements AdbcStatementInterface {
      * @returns A Promise resolving to the number of rows affected.
      */
     async executeUpdate(): Promise<number | bigint> {
-        // executeUpdate IS async
         const rows = await this._inner.executeUpdate();
         return rows as number;
     }
@@ -310,15 +325,17 @@ export class AdbcStatement implements AdbcStatementInterface {
      * @param data Arrow RecordBatch or Table containing the data to bind.
      */
     async bind(data: RecordBatch | Table): Promise<void> {
+          console.log('GETS HERE 8f')
         let table: Table;
         if (data instanceof Table) {
+          console.log('IS A TABLE')
             table = data;
         } else {
+          console.log('IS NOT A TABLE')
             table = new Table(data);
         }
 
         const ipcBytes = tableToIPC(table, "stream");
-        // bind IS async
         await this._inner.bind(Buffer.from(ipcBytes));
     }
 
@@ -332,7 +349,7 @@ export class AdbcStatement implements AdbcStatementInterface {
     /**
      * Release resources when using `await using` syntax.
      */
-    async [asyncDisposeSymbol](): Promise<void> {
+    async [Symbol.asyncDispose](): Promise<void> {
         return this.close();
     }
 }

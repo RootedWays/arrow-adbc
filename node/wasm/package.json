@@ -1,0 +1,20 @@
+{
+  "name": "adbc-node-wasm",
+  "version": "0.0.1",
+  "description": "WASM ADBC Driver Manager",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "echo 'WASM tests not set up yet'"
+  },
+  "peerDependencies": {
+    "apache-arrow": "^21.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

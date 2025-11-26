@@ -3,7 +3,9 @@
   "private": true,
   "workspaces": [
     "native",
-    "shared"
+    "shared",
+    "wasm",
+    "gateway"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
