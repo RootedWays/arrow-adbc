@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  # Driver: adbc_driver_postgresql
+  postgres:
+    image: postgres:17-ubuntu # Changed to postgres:17-ubuntu as requested
+    container_name: adbc_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: adbc_user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: adbc_demo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adbc_user -d adbc_demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
