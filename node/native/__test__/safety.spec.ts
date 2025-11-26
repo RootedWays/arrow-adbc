@@ -16,18 +16,11 @@
 // under the License.
 
 import test from 'ava'
-import { getDriverPath } from './test_utils';
-
-import { AdbcDatabase } from '../lib/index.ts'
+import { createSqliteDatabase } from './test_utils';
 
 test('safety: iterator survives connection close', async (t) => {
-  const driverPath = getDriverPath("adbc_driver_sqlite");
-
   // 1. Setup
-  const database = new AdbcDatabase({
-      driver: driverPath,
-      entrypoint: "AdbcDriverSQLiteInit"
-  });
+  const database = await createSqliteDatabase();
   const connection = await database.connect();
   const statement = await connection.createStatement();
   await statement.setSqlQuery("SELECT 1 as val");

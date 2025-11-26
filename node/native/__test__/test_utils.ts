@@ -18,6 +18,7 @@
 import * as path from 'path';
 import * as process from 'process';
 import { fileURLToPath } from 'url';
+import { AdbcDatabase, AdbcConnection, AdbcStatement } from '../lib/index.js';
 
 // Resolve __dirname for ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -36,12 +37,38 @@ export function getDriverPath(driverName: string): string {
   if (platform === 'darwin') {
     libName = `lib${driverName}.dylib`;
   } else if (platform === 'win32') {
-    // Windows usually doesn't use 'lib' prefix for DLLs, or does it?
-    // Let's assume standard CMake behavior on Windows might NOT add 'lib'.
-    // But for now let's just fix Mac/Linux.
     libName = `${driverName}.dll`;
   }
 
   // Path from node/native/__test__ to node/native/build/lib
   return path.join(__dirname, '../build/lib', libName);
+}
+
+export async function createSqliteDatabase(): Promise<AdbcDatabase> {
+  const driverPath = getDriverPath("adbc_driver_sqlite");
+  return new AdbcDatabase({
+      driver: driverPath,
+      entrypoint: "AdbcDriverSQLiteInit"
+  });
+}
+
+export async function withSqlite(
+  callback: (db: AdbcDatabase, conn: AdbcConnection, stmt: AdbcStatement) => Promise<void>
+): Promise<void> {
+  const db = await createSqliteDatabase();
+  const conn = await db.connect();
+  const stmt = await conn.createStatement();
+  
+  try {
+    await callback(db, conn, stmt);
+  } finally {
+    await stmt.close();
+    await conn.close();
+    await db.close();
+  }
+}
+
+export async function createTestTable(stmt: AdbcStatement, tableName: string = "test_table"): Promise<void> {
+    await stmt.setSqlQuery(`CREATE TABLE ${tableName} (id INTEGER, name TEXT)`);
+    await stmt.executeUpdate();
 }

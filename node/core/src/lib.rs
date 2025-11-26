@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 
 use adbc_core::{
     options::{AdbcVersion, InfoCode, ObjectDepth, OptionConnection, OptionDatabase, OptionStatement, OptionValue},
-    Connection, Database, Driver, LoadFlags, Statement, Optionable, LOAD_FLAG_DEFAULT,
+    Connection, Database, Driver, Statement, Optionable, LOAD_FLAG_DEFAULT,
 };
 use adbc_driver_manager::{ManagedConnection, ManagedDatabase, ManagedDriver, ManagedStatement};
 use arrow_array::RecordBatchReader;
@@ -48,6 +48,10 @@ pub struct ConnectOptions {
     pub database_options: Option<HashMap<String, String>>,
 }
 
+pub struct QueryOptions {
+    pub statement_options: Option<HashMap<String, String>>,
+}
+
 pub struct GetObjectsOptions {
     pub depth: i32,
     pub catalog: Option<String>,
@@ -55,6 +59,12 @@ pub struct GetObjectsOptions {
     pub table_name: Option<String>,
     pub table_type: Option<Vec<String>>,
     pub column_name: Option<String>,
+}
+
+pub struct GetTableSchemaOptions {
+    pub catalog: Option<String>,
+    pub db_schema: Option<String>,
+    pub table_name: String,
 }
 
 pub struct _AdbcDatabaseCore {
@@ -110,6 +120,20 @@ impl _AdbcConnectionCore {
         Ok(_AdbcStatementCore { inner: stmt })
     }
 
+    pub fn set_option(&self, key: &str, value: &str) -> Result<()> {
+        let mut conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
+        let option_key = match key {
+            "autocommit" => OptionConnection::AutoCommit,
+            "readonly" | "readOnly" => OptionConnection::ReadOnly,
+            "currentCatalog" | "catalog" => OptionConnection::CurrentCatalog,
+            "currentSchema" | "schema" => OptionConnection::CurrentSchema,
+            "isolationLevel" => OptionConnection::IsolationLevel,
+            other => OptionConnection::Other(other.to_string()),
+        };
+        conn.set_option(option_key, OptionValue::String(value.to_string()))?;
+        Ok(())
+    }
+
     pub fn get_objects(&self, opts: GetObjectsOptions) -> Result<_AdbcConnectionResultIteratorCore> {
         let conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
         let depth = match opts.depth {
@@ -143,9 +167,9 @@ impl _AdbcConnectionCore {
         })
     }
 
-    pub fn get_table_schema(&self, catalog: Option<String>, db_schema: Option<String>, table_name: String) -> Result<Vec<u8>> {
+    pub fn get_table_schema(&self, opts: GetTableSchemaOptions) -> Result<Vec<u8>> {
         let conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
-        let schema = conn.get_table_schema(catalog.as_deref(), db_schema.as_deref(), &table_name)?;
+        let schema = conn.get_table_schema(opts.catalog.as_deref(), opts.db_schema.as_deref(), &opts.table_name)?;
         
         let mut output = Vec::new();
         let _writer = StreamWriter::try_new(&mut output, &schema)?;
@@ -167,10 +191,12 @@ impl _AdbcConnectionCore {
         })
     }
 
-    pub fn get_info(&self, _info_codes: Option<Vec<u32>>) -> Result<_AdbcConnectionResultIteratorCore> {
+    pub fn get_info(&self, info_codes: Option<Vec<u32>>) -> Result<_AdbcConnectionResultIteratorCore> {
         let conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
-        // TODO: Fix InfoCode conversion from u32
-        let codes = None; 
+        let codes: Option<HashSet<InfoCode>> = info_codes
+            .map(|v| v.into_iter()
+                .filter_map(|code| InfoCode::try_from(code as u32).ok())
+                .collect::<HashSet<InfoCode>>());
         let reader = conn.get_info(codes)?;
 
         let reader: Box<dyn RecordBatchReader + Send> = unsafe {
@@ -182,6 +208,18 @@ impl _AdbcConnectionCore {
             _connection: conn.clone(),
             schema: None,
         })
+    }
+
+    pub fn commit(&self) -> Result<()> {
+        let mut conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
+        conn.commit()?;
+        Ok(())
+    }
+
+    pub fn rollback(&self) -> Result<()> {
+        let mut conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
+        conn.rollback()?;
+        Ok(())
     }
 }
 
