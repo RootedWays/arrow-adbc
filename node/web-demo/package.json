@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "gen": "npx kubb generate"
   },
   "dependencies": {
+    "@radix-ui/react-slot": "^1.2.4",
     "apache-arrow": "^21.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -20,6 +22,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@kubb/core": "^4.7.1",
+    "@kubb/plugin-zod": "^4.7.1",
+    "@kubb/swagger": "^2.28.4",
+    "@kubb/swagger-ts": "^2.28.4",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
@@ -31,9 +37,11 @@
     "globals": "^16.5.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vite": "npm:rolldown-vite@7.2.5"
+    "vite": "npm:rolldown-vite@7.2.5",
+    "zod": "^4.1.13"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.2.5"

@@ -1,0 +1,54 @@
+openapi: 3.0.0
+info:
+  title: ADBC Gateway API
+  version: 1.0.0
+paths:
+  /query:
+    post:
+      summary: Execute a SQL query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: Query executed successfully
+          content:
+            application/vnd.apache.arrow.stream:
+              schema:
+                type: string # This will be handled as binary by apache-arrow, but for Zod/TS a string is a placeholder
+            application/json:
+              schema:
+                type: object # Placeholder for JSON response if any
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    QueryRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: The SQL query to execute
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message

@@ -16,7 +16,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+utoipa = { version = "4.2", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 thiserror = "1.0"
 
 # CLI Argument Parsing
@@ -27,3 +29,5 @@ clap = { version = "4.4", features = ["derive", "env"] }
 adbc_core = { path = "../../rust/core" }
 adbc_driver_manager = { path = "../../rust/driver_manager" }
 arrow = { version = "57.1.0", features = ["ipc"] } # Match version from core/Cargo.toml if possible, but 53.1.0 is safe
+deadpool = "0.12.3"
+async-trait = "0.1.89"
