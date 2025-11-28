@@ -1,8 +1,8 @@
 use adbc_core::{
-    options::{OptionConnection, OptionDatabase, OptionValue},
-    Connection, Driver, Optionable,
+    options::{OptionConnection, OptionDatabase, OptionStatement, OptionValue},
+    Connection, Driver, Optionable, Statement,
 };
-use adbc_driver_manager::ManagedConnection;
+use adbc_driver_manager::{ManagedConnection, ManagedStatement};
 use axum::{
     extract::Path,
     http::StatusCode,
@@ -71,6 +71,16 @@ struct CreateConnectionResponse {
     id: String,
 }
 
+#[derive(serde::Serialize, utoipa::ToSchema)]
+struct CreateStatementResponse {
+    id: String,
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct SetSqlQueryRequest {
+    query: String,
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -83,9 +93,22 @@ struct CreateConnectionResponse {
         delete_connection,
         commit_connection,
         rollback_connection,
-        cancel_connection
+        cancel_connection,
+        create_statement,
+        delete_statement,
+        set_statement_sql_query,
+        prepare_statement,
+        execute_statement_update
     ),
-    components(schemas(CreateDatabaseRequest, CreateDatabaseResponse, CreateConnectionRequest, CreateConnectionResponse, crate::database_manager::DatabaseInfo)),
+    components(schemas(
+        CreateDatabaseRequest, 
+        CreateDatabaseResponse, 
+        CreateConnectionRequest, 
+        CreateConnectionResponse, 
+        CreateStatementResponse,
+        SetSqlQueryRequest,
+        crate::database_manager::DatabaseInfo
+    )),
     tags((
         name = "quiver",
         description = "ADBC Gateway API"
@@ -147,6 +170,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/connections/:id/commit", post(commit_connection))
         .route("/connections/:id/rollback", post(rollback_connection))
         .route("/connections/:id/cancel", post(cancel_connection))
+        .route("/connections/:id/statements", post(create_statement))
+        .route("/statements/:id", delete(delete_statement))
+        .route("/statements/:id/sql", post(set_statement_sql_query))
+        .route("/statements/:id/prepare", post(prepare_statement))
+        .route("/statements/:id/execute_update", post(execute_statement_update))
         .layer(Extension(state));
 
     // Run it
@@ -466,4 +494,161 @@ async fn cancel_connection(
     id: Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_connection_action(state, id, |conn| conn.cancel(), "cancel operation").await
+}
+#[utoipa::path(
+    post,
+    path = "/connections/{id}/statements",
+    params((
+        "id" = String,
+        Path,
+        description = "Connection ID to create statement from"
+    )),
+    responses((
+        status = 200,
+        description = "Statement created",
+        body = CreateStatementResponse
+    ), (status = 404, description = "Connection not found"), (status = 500, description = "Failed to create statement"))
+)]
+async fn create_statement(
+    Extension(state): Extension<Arc<AppState>>,
+    Path(conn_id): Path<String>,
+) -> Result<Json<CreateStatementResponse>, (StatusCode, String)> {
+    let conn_entry = state.connection_registry.get(&conn_id).await
+        .ok_or((StatusCode::NOT_FOUND, format!("Connection '{}' not found", conn_id)))?;
+
+    let mut conn_guard = conn_entry.connection.lock().await;
+    let managed_conn = &mut ***conn_guard;
+    
+    let statement = managed_conn.new_statement().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create statement: {}", e),
+        )
+    })?;
+
+    let stmt_id = state.statement_registry.register(statement).await;
+
+    tracing::info!("Created statement '{}' from connection '{}'", stmt_id, conn_id);
+    Ok(Json(CreateStatementResponse { id: stmt_id }))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/statements/{id}",
+    params((
+        "id" = String,
+        Path,
+        description = "Statement ID to release"
+    )),
+    responses((
+        status = 204,
+        description = "Statement released"
+    ), (status = 404, description = "Statement not found"))
+)]
+async fn delete_statement(
+    Extension(state): Extension<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if state.statement_registry.remove(&id).await.is_some() {
+        tracing::info!("Released statement '{}'", id);
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            format!("Statement '{}' not found", id),
+        ))
+    }
+}
+
+async fn handle_statement_action(
+    state: Extension<Arc<AppState>>,
+    id: Path<String>,
+    action: impl FnOnce(&mut ManagedStatement) -> Result<(), adbc_core::error::Error>,
+    action_name: &str,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let stmt_id = id.0;
+    let stmt_entry = state.statement_registry.get(&stmt_id).await
+        .ok_or((StatusCode::NOT_FOUND, format!("Statement '{}' not found", stmt_id)))?;
+
+    let mut stmt_guard = stmt_entry.statement.lock().await;
+    
+    action(&mut *stmt_guard)
+        .map_err(|e| {
+             let status = match e.status {
+                adbc_core::error::Status::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+                adbc_core::error::Status::InvalidState => StatusCode::CONFLICT,
+                adbc_core::error::Status::InvalidArguments => StatusCode::BAD_REQUEST,
+                adbc_core::error::Status::NotFound => StatusCode::NOT_FOUND,
+                adbc_core::error::Status::AlreadyExists => StatusCode::CONFLICT,
+                adbc_core::error::Status::Unauthenticated => StatusCode::UNAUTHORIZED,
+                adbc_core::error::Status::IO => StatusCode::SERVICE_UNAVAILABLE,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, format!("Failed to {}: {} (ADBC Status: {:?})", action_name, e.message, e.status))
+        })?;
+
+    tracing::info!("Statement '{}' {}.", stmt_id, action_name);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/statements/{id}/sql",
+    params((
+        "id" = String,
+        Path,
+        description = "Statement ID"
+    )),
+    request_body = SetSqlQueryRequest,
+    responses((
+        status = 204,
+        description = "SQL query set"
+    ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to set SQL query"))
+)]
+async fn set_statement_sql_query(
+    state: Extension<Arc<AppState>>,
+    id: Path<String>,
+    Json(payload): Json<SetSqlQueryRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    handle_statement_action(state, id, move |stmt| stmt.set_sql_query(&payload.query), "set SQL query").await
+}
+
+#[utoipa::path(
+    post,
+    path = "/statements/{id}/prepare",
+    params((
+        "id" = String,
+        Path,
+        description = "Statement ID"
+    )),
+    responses((
+        status = 204,
+        description = "Statement prepared"
+    ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to prepare statement"))
+)]
+async fn prepare_statement(
+    state: Extension<Arc<AppState>>,
+    id: Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    handle_statement_action(state, id, |stmt| stmt.prepare(), "prepare statement").await
+}
+
+#[utoipa::path(
+    post,
+    path = "/statements/{id}/execute_update",
+    params((
+        "id" = String,
+        Path,
+        description = "Statement ID"
+    )),
+    responses((
+        status = 204,
+        description = "Update executed"
+    ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to execute update"))
+)]
+async fn execute_statement_update(
+    state: Extension<Arc<AppState>>,
+    id: Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    handle_statement_action(state, id, |stmt| stmt.execute_update().map(|_| ()), "execute update").await
 }
