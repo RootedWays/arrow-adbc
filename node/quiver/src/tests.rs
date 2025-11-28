@@ -13,6 +13,8 @@ use crate::{
     driver_manager::DriverRegistry, health_check, list_databases, list_drivers,
     statement_manager::StatementRegistry, AppState,
     commit_connection, rollback_connection, cancel_connection,
+    create_statement, delete_statement, set_statement_sql_query, prepare_statement,
+    execute_statement_update,
 };
 use axum::routing::{delete, get, post};
 use axum::Extension;
@@ -45,6 +47,11 @@ async fn app() -> Router {
         .route("/connections/:id/commit", post(commit_connection))
         .route("/connections/:id/rollback", post(rollback_connection))
         .route("/connections/:id/cancel", post(cancel_connection))
+        .route("/connections/:id/statements", post(create_statement))
+        .route("/statements/:id", delete(delete_statement))
+        .route("/statements/:id/sql", post(set_statement_sql_query))
+        .route("/statements/:id/prepare", post(prepare_statement))
+        .route("/statements/:id/execute_update", post(execute_statement_update))
         .layer(Extension(state))
 }
 
@@ -471,6 +478,183 @@ async fn test_error_handling() {
             Request::builder()
                 .method("POST")
                 .uri("/connections/non-existent-id/cancel")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+#[tokio::test]
+async fn test_statement_lifecycle() {
+    let app = app().await;
+
+    // 1. Create Database
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/databases")
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{ "driver": "sqlite", "options": { "uri": ":memory:" } }"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let db_id = serde_json::from_slice::<Value>(&body_bytes).unwrap()["id"].as_str().unwrap().to_string();
+
+    // 2. Create Connection
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/databases/{}/connections", db_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let conn_id = serde_json::from_slice::<Value>(&body_bytes).unwrap()["id"].as_str().unwrap().to_string();
+
+    // 3. Create Statement
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/connections/{}/statements", conn_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let stmt_id = serde_json::from_slice::<Value>(&body_bytes).unwrap()["id"].as_str().unwrap().to_string();
+    println!("Created Statement ID: {}", stmt_id);
+
+    // 4. Set SQL Query
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/sql", stmt_id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{ "query": "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)" }"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // 5. Prepare Statement (Optional but good to test)
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/prepare", stmt_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // 6. Execute Update
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/execute_update", stmt_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // 7. Delete Statement
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(&format!("/statements/{}", stmt_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // Cleanup
+    let _ = app.clone().oneshot(Request::builder().method("DELETE").uri(&format!("/connections/{}", conn_id)).body(Body::empty()).unwrap()).await;
+    let _ = app.oneshot(Request::builder().method("DELETE").uri(&format!("/databases/{}", db_id)).body(Body::empty()).unwrap()).await;
+}
+
+#[tokio::test]
+async fn test_statement_error_handling() {
+    let app = app().await;
+
+    // 1. Create Statement on non-existent Connection
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/connections/non-existent-id/statements")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // 2. Set SQL on non-existent Statement
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/statements/non-existent-id/sql")
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{ "query": "SELECT 1" }"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // 3. Prepare non-existent Statement
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/statements/non-existent-id/prepare")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // 4. Execute Update on non-existent Statement
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/statements/non-existent-id/execute_update")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // 5. Delete non-existent Statement
+    let response = app.clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/statements/non-existent-id")
                 .body(Body::empty())
                 .unwrap(),
         )
