@@ -1,14 +1,14 @@
+use adbc_core::Database;
+use adbc_driver_manager::{ManagedConnection, ManagedDatabase};
+use deadpool::managed::{Manager, Object, Pool, RecycleResult};
+use serde::Serialize;
 use std::{
     collections::HashMap,
-    sync::Arc,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
-use adbc_driver_manager::{ManagedDatabase, ManagedConnection};
-use adbc_core::{Database, Optionable, Connection};
-use serde::Serialize;
-use deadpool::managed::{Manager, Pool, Object, RecycleResult};
 
 // --- Pooling Infrastructure ---
 
@@ -52,11 +52,15 @@ impl Manager for AdbcConnectionManager {
         let db = self.database.lock().await;
         let conn = db.new_connection()?;
         // TODO: Verify if init is needed or implied.
-        // Connection::init(&mut conn)?; 
+        // Connection::init(&mut conn)?;
         Ok(QuiverConnection(conn))
     }
 
-    async fn recycle(&self, _conn: &mut QuiverConnection, _metrics: &deadpool::managed::Metrics) -> RecycleResult<Self::Error> {
+    async fn recycle(
+        &self,
+        _conn: &mut QuiverConnection,
+        _metrics: &deadpool::managed::Metrics,
+    ) -> RecycleResult<Self::Error> {
         Ok(())
     }
 }
@@ -76,7 +80,9 @@ pub struct DatabaseEntry {
 }
 
 impl DatabaseEntry {
-    pub async fn acquire_connection(&self) -> Result<AdbcConnectionObject, adbc_core::error::Error> {
+    pub async fn acquire_connection(
+        &self,
+    ) -> Result<AdbcConnectionObject, adbc_core::error::Error> {
         self.pool.get().await.map_err(|e| {
             adbc_core::error::Error::with_message_and_status(
                 format!("Failed to acquire connection from pool: {}", e),
@@ -101,15 +107,15 @@ impl DatabaseRegistry {
 
     pub async fn register(&self, driver_name: String, database: ManagedDatabase) -> String {
         let id = Uuid::new_v4().to_string();
-        
+
         // Wrap database in Mutex for Manager
         let db_arc = Arc::new(Mutex::new(database));
         let manager = AdbcConnectionManager::new(db_arc.clone());
-        
+
         let pool = Pool::builder(manager)
             .max_size(16) // Default max size
             .build()
-            .expect("Failed to build connection pool"); 
+            .expect("Failed to build connection pool");
 
         let entry = DatabaseEntry {
             id: id.clone(),
@@ -117,7 +123,7 @@ impl DatabaseRegistry {
             database: db_arc,
             pool,
         };
-        
+
         let mut db_map = self.databases.write().await;
         db_map.insert(id.clone(), entry);
         id
@@ -135,7 +141,8 @@ impl DatabaseRegistry {
 
     pub async fn list(&self) -> Vec<DatabaseInfo> {
         let db_map = self.databases.read().await;
-        db_map.values()
+        db_map
+            .values()
             .map(|entry| DatabaseInfo {
                 id: entry.id.clone(),
                 driver_name: entry.driver_name.clone(),

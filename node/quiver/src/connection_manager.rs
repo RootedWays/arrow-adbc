@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     sync::Arc,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Mutex};
 use uuid::Uuid;
 use crate::database_manager::AdbcConnectionObject;
 
@@ -10,7 +10,7 @@ pub struct ConnectionEntry {
     pub id: String,
     // Holds the pooled object. When this Entry is dropped (e.g. on remove),
     // the Object is dropped, returning the connection to the pool.
-    pub connection: AdbcConnectionObject,
+    pub connection: Mutex<AdbcConnectionObject>, // Wrapped in Mutex for interior mutability
 }
 
 pub struct ConnectionRegistry {
@@ -28,7 +28,7 @@ impl ConnectionRegistry {
         let id = Uuid::new_v4().to_string();
         let entry = Arc::new(ConnectionEntry {
             id: id.clone(),
-            connection,
+            connection: Mutex::new(connection), // Wrap in Mutex here
         });
         
         let mut conn_map = self.connections.write().await;

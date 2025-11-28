@@ -1,10 +1,7 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use adbc_driver_manager::ManagedStatement;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use adbc_driver_manager::ManagedStatement;
 
 #[derive(Clone)]
 pub struct StatementEntry {
@@ -29,7 +26,7 @@ impl StatementRegistry {
             id: id.clone(),
             statement: Arc::new(statement),
         };
-        
+
         let mut stmt_map = self.statements.write().await;
         stmt_map.insert(id.clone(), entry);
         id

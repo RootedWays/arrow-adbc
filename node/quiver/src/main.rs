@@ -1,27 +1,30 @@
+use adbc_core::{
+    options::{OptionConnection, OptionDatabase, OptionValue},
+    Connection, Driver, Optionable,
+};
+use adbc_driver_manager::ManagedConnection;
 use axum::{
-    routing::{get, post, delete},
-    Router,
-    Extension, Json,
     extract::Path,
     http::StatusCode,
+    routing::{delete, get, post},
+    Extension, Json, Router,
 };
-use std::net::SocketAddr;
-use std::collections::HashMap;
-use std::sync::Arc;
 use clap::Parser;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use adbc_core::{Driver, Optionable, options::{OptionDatabase, OptionValue}};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-mod driver_manager;
-mod database_manager;
 mod connection_manager;
+mod database_manager;
+mod driver_manager;
 mod statement_manager;
 
-use crate::driver_manager::DriverRegistry;
-use crate::database_manager::DatabaseRegistry;
 use crate::connection_manager::ConnectionRegistry;
+use crate::database_manager::DatabaseRegistry;
+use crate::driver_manager::DriverRegistry;
 use crate::statement_manager::StatementRegistry;
 
 #[cfg(test)]
@@ -45,16 +48,22 @@ struct AppState {
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 struct CreateDatabaseRequest {
-    #[schema(example = "sqlite")]
+    #[schema(example = r#"{"uri": ":memory:"}"#)]
     driver: String,
     #[serde(default)]
-    #[schema(example = "{\"uri\": \":memory:\"}")]
     options: HashMap<String, String>,
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
 struct CreateDatabaseResponse {
     id: String,
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct CreateConnectionRequest {
+    #[serde(default)]
+    #[schema(example = r#"{"adbc.connection.autocommit": "false"}"#)]
+    options: HashMap<String, String>,
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -71,9 +80,12 @@ struct CreateConnectionResponse {
         create_database,
         delete_database,
         create_connection,
-        delete_connection
+        delete_connection,
+        commit_connection,
+        rollback_connection,
+        cancel_connection
     ),
-    components(schemas(CreateDatabaseRequest, CreateDatabaseResponse, CreateConnectionResponse, crate::database_manager::DatabaseInfo)),
+    components(schemas(CreateDatabaseRequest, CreateDatabaseResponse, CreateConnectionRequest, CreateConnectionResponse, crate::database_manager::DatabaseInfo)),
     tags((
         name = "quiver",
         description = "ADBC Gateway API"
@@ -105,7 +117,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if driver_registry.list_drivers().is_empty() {
         tracing::warn!("No ADBC drivers found. The gateway will start without any active database connections.");
     } else {
-        tracing::info!("Discovered and loaded drivers: {:?}", driver_registry.list_drivers());
+        tracing::info!(
+            "Discovered and loaded drivers: {:?}",
+            driver_registry.list_drivers()
+        );
     }
 
     let database_registry = DatabaseRegistry::new();
@@ -129,6 +144,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/databases/:id", delete(delete_database))
         .route("/databases/:id/connections", post(create_connection))
         .route("/connections/:id", delete(delete_connection))
+        .route("/connections/:id/commit", post(commit_connection))
+        .route("/connections/:id/rollback", post(rollback_connection))
+        .route("/connections/:id/cancel", post(cancel_connection))
         .layer(Extension(state));
 
     // Run it
@@ -175,7 +193,9 @@ async fn list_drivers(Extension(state): Extension<Arc<AppState>>) -> Json<Vec<St
         body = Vec<DatabaseInfo>
     ))
 )]
-async fn list_databases(Extension(state): Extension<Arc<AppState>>) -> Json<Vec<crate::database_manager::DatabaseInfo>> {
+async fn list_databases(
+    Extension(state): Extension<Arc<AppState>>,
+) -> Json<Vec<crate::database_manager::DatabaseInfo>> {
     let dbs = state.database_registry.list().await;
     Json(dbs)
 }
@@ -194,10 +214,11 @@ async fn create_database(
     Extension(state): Extension<Arc<AppState>>,
     Json(payload): Json<CreateDatabaseRequest>,
 ) -> Result<Json<CreateDatabaseResponse>, (StatusCode, String)> {
-    
     // 1. Find the driver
-    let driver_manager_arc = state.driver_registry.get_driver(&payload.driver)
-        .ok_or((StatusCode::BAD_REQUEST, format!("Driver '{}' not found", payload.driver)))?;
+    let driver_manager_arc = state.driver_registry.get_driver(&payload.driver).ok_or((
+        StatusCode::BAD_REQUEST,
+        format!("Driver '{}' not found", payload.driver),
+    ))?;
 
     // 2. Prepare Options
     let mut adbc_options = Vec::new();
@@ -216,12 +237,21 @@ async fn create_database(
     // new_database_with_opts handles allocation, setting options, and initialization atomically.
     let database = {
         let mut driver_guard = driver_manager_arc.lock().await;
-        driver_guard.new_database_with_opts(adbc_options)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create database: {}", e)))? 
+        driver_guard
+            .new_database_with_opts(adbc_options)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to create database: {}", e),
+                )
+            })?
     };
 
     // 4. Register
-    let id = state.database_registry.register(payload.driver.clone(), database).await;
+    let id = state
+        .database_registry
+        .register(payload.driver.clone(), database)
+        .await;
 
     tracing::info!("Created database '{}' with driver '{}'", id, payload.driver);
 
@@ -249,7 +279,10 @@ async fn delete_database(
         tracing::info!("Deleted database '{}'", id);
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err((StatusCode::NOT_FOUND, format!("Database '{}' not found", id)))
+        Err((
+            StatusCode::NOT_FOUND,
+            format!("Database '{}' not found", id),
+        ))
     }
 }
 
@@ -261,6 +294,7 @@ async fn delete_database(
         Path,
         description = "Database ID to acquire connection from"
     )),
+    request_body = Option<CreateConnectionRequest>,
     responses((
         status = 200,
         description = "Connection acquired successfully",
@@ -270,19 +304,46 @@ async fn delete_database(
 async fn create_connection(
     Extension(state): Extension<Arc<AppState>>,
     Path(db_id): Path<String>,
+    payload: Option<Json<CreateConnectionRequest>>,
 ) -> Result<Json<CreateConnectionResponse>, (StatusCode, String)> {
     // 1. Get the database
-    let db_entry = state.database_registry.get(&db_id).await
-        .ok_or((StatusCode::NOT_FOUND, format!("Database '{}' not found", db_id)))?;
+    let db_entry = state.database_registry.get(&db_id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Database '{}' not found", db_id),
+    ))?;
 
     // 2. Acquire connection from pool
-    let connection = db_entry.acquire_connection().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to acquire connection: {}", e)))?;
+    let mut connection = db_entry.acquire_connection().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to acquire connection: {}", e),
+        )
+    })?;
 
-    // 3. Register the connection (session)
+    // 3. Apply Options if provided
+    if let Some(Json(req)) = payload {
+        for (key, value) in req.options {
+            let opt_key = match key.to_lowercase().as_str() {
+                "adbc.connection.autocommit" => OptionConnection::AutoCommit,
+                "adbc.connection.readonly" => OptionConnection::ReadOnly,
+                _ => OptionConnection::Other(key),
+            };
+            let opt_val = OptionValue::String(value);
+            
+            let managed_conn = &mut **connection;
+            Optionable::set_option(managed_conn, opt_key, opt_val)
+                .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to set option: {}", e)))?;
+        }
+    }
+
+    // 4. Register the connection (session)
     let conn_id = state.connection_registry.register(connection).await;
 
-    tracing::info!("Acquired connection '{}' from database '{}'", conn_id, db_id);
+    tracing::info!(
+        "Acquired connection '{}' from database '{}'",
+        conn_id,
+        db_id
+    );
 
     Ok(Json(CreateConnectionResponse { id: conn_id }))
 }
@@ -305,11 +366,104 @@ async fn delete_connection(
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     if state.connection_registry.remove(&id).await.is_some() {
-        // Dropping the entry will drop the AdbcConnectionObject, 
-        // which automatically returns the connection to the pool.
         tracing::info!("Released connection '{}'", id);
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err((StatusCode::NOT_FOUND, format!("Connection '{}' not found", id)))
+        Err((
+            StatusCode::NOT_FOUND,
+            format!("Connection '{}' not found", id),
+        ))
     }
+}
+
+async fn handle_connection_action(
+    state: Extension<Arc<AppState>>,
+    id: Path<String>,
+    action: impl FnOnce(&mut ManagedConnection) -> Result<(), adbc_core::error::Error>,
+    action_name: &str,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let conn_id = id.0;
+    let conn_entry = state.connection_registry.get(&conn_id).await
+        .ok_or((StatusCode::NOT_FOUND, format!("Connection '{}' not found", conn_id)))?;
+
+    let mut conn_guard = conn_entry.connection.lock().await;
+    let managed_conn = &mut ***conn_guard;
+    
+    action(managed_conn)
+        .map_err(|e| {
+            let status = match e.status {
+                adbc_core::error::Status::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+                adbc_core::error::Status::InvalidState => StatusCode::CONFLICT,
+                adbc_core::error::Status::InvalidArguments => StatusCode::BAD_REQUEST,
+                adbc_core::error::Status::NotFound => StatusCode::NOT_FOUND,
+                adbc_core::error::Status::AlreadyExists => StatusCode::CONFLICT,
+                adbc_core::error::Status::Unauthenticated => StatusCode::UNAUTHORIZED,
+                adbc_core::error::Status::IO => StatusCode::SERVICE_UNAVAILABLE,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, format!("Failed to {}: {} (ADBC Status: {:?})", action_name, e.message, e.status))
+        })?;
+
+    tracing::info!("Connection '{}' {}.", conn_id, action_name);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/connections/{id}/commit",
+    params((
+        "id" = String,
+        Path,
+        description = "Connection ID to commit transaction"
+    )),
+    responses((
+        status = 204,
+        description = "Transaction committed"
+    ), (status = 404, description = "Connection not found"), (status = 500, description = "Failed to commit transaction"))
+)]
+async fn commit_connection(
+    state: Extension<Arc<AppState>>,
+    id: Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    handle_connection_action(state, id, |conn| conn.commit(), "commit transaction").await
+}
+
+#[utoipa::path(
+    post,
+    path = "/connections/{id}/rollback",
+    params((
+        "id" = String,
+        Path,
+        description = "Connection ID to rollback transaction"
+    )),
+    responses((
+        status = 204,
+        description = "Transaction rolled back"
+    ), (status = 404, description = "Connection not found"), (status = 500, description = "Failed to rollback transaction"))
+)]
+async fn rollback_connection(
+    state: Extension<Arc<AppState>>,
+    id: Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    handle_connection_action(state, id, |conn| conn.rollback(), "rollback transaction").await
+}
+
+#[utoipa::path(
+    post,
+    path = "/connections/{id}/cancel",
+    params((
+        "id" = String,
+        Path,
+        description = "Connection ID to cancel current operation"
+    )),
+    responses((
+        status = 204,
+        description = "Operation cancelled"
+    ), (status = 404, description = "Connection not found"), (status = 500, description = "Failed to cancel operation"))
+)]
+async fn cancel_connection(
+    state: Extension<Arc<AppState>>,
+    id: Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    handle_connection_action(state, id, |conn| conn.cancel(), "cancel operation").await
 }
