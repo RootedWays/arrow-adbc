@@ -16,12 +16,14 @@ pub enum DriverRegistryError {
     Io(#[from] std::io::Error),
     #[error("ADBC driver error: {0}")]
     Adbc(#[from] adbc_core::error::Error),
-    #[error("Driver name (filename stem) missing or not valid UTF-8 for manifest: {path}")]
-    InvalidDriverName { path: PathBuf },
-    #[error("Unsupported platform for driver discovery")]
-    UnsupportedPlatform,
     #[error("Environment variable not found: {0}")]
     EnvVarNotFound(String),
+    #[error("Platform not supported")]
+    UnsupportedPlatform,
+    #[error("Driver name (filename stem) missing or not valid UTF-8 for manifest: {path}")]
+    InvalidDriverName { path: PathBuf },
+    #[error("Failed to load driver: {0}")]
+    LoadError(adbc_core::error::Error),
 }
 
 pub struct DriverRegistry {

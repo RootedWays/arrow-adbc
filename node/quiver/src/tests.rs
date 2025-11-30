@@ -8,18 +8,19 @@ use std::sync::Arc;
 use tower::util::ServiceExt; // for `oneshot`
 
 use crate::{
-    connection_manager::ConnectionRegistry, create_connection, create_database,
-    database_manager::DatabaseRegistry, delete_connection, delete_database,
-    driver_manager::DriverRegistry, health_check, list_databases, list_drivers,
+    cancel_connection, commit_connection, connection_manager::ConnectionRegistry,
+    create_connection, create_database, create_statement, database_manager::DatabaseRegistry,
+    delete_connection, delete_database, delete_statement, driver_manager::DriverRegistry,
+    execute_statement_query, execute_statement_update, get_connection_info, get_connection_objects,
+    get_connection_table_schema, get_connection_table_types, health_check, list_databases,
+    list_drivers, prepare_statement, rollback_connection, set_statement_sql_query,
     statement_manager::StatementRegistry, AppState,
-    commit_connection, rollback_connection, cancel_connection,
-    create_statement, delete_statement, set_statement_sql_query, prepare_statement,
-    execute_statement_update,
 };
 use axum::routing::{delete, get, post};
 use axum::Extension;
 
-// Helper to build the app router for testing
+// --- Helper Functions ---
+
 async fn app() -> Router {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("quiver=debug,tower_http=debug")
@@ -51,9 +52,139 @@ async fn app() -> Router {
         .route("/statements/:id", delete(delete_statement))
         .route("/statements/:id/sql", post(set_statement_sql_query))
         .route("/statements/:id/prepare", post(prepare_statement))
-        .route("/statements/:id/execute_update", post(execute_statement_update))
+        .route("/statements/:id/execute", post(execute_statement_query))
+        .route(
+            "/statements/:id/execute_update",
+            post(execute_statement_update),
+        )
+        .route("/connections/:id/info", get(get_connection_info))
+        .route("/connections/:id/objects", get(get_connection_objects))
+        .route(
+            "/connections/:id/table-types",
+            get(get_connection_table_types),
+        )
+        .route(
+            "/connections/:id/tables/:table_name/schema",
+            get(get_connection_table_schema),
+        )
         .layer(Extension(state))
 }
+
+async fn create_test_db(app: &Router) -> String {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/databases")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    r#"{ "driver": "sqlite", "options": { "uri": ":memory:" } }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice::<Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn create_test_conn(app: &Router, db_id: &str) -> String {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/databases/{}/connections", db_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice::<Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn create_test_stmt(app: &Router, conn_id: &str) -> String {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/connections/{}/statements", conn_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice::<Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn exec_update(app: &Router, stmt_id: &str, sql: &str) {
+    // Set SQL
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/sql", stmt_id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(format!(r#"{{ "query": "{}" }}"#, sql)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // Execute
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/execute_update", stmt_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+}
+
+async fn delete_resource(app: &Router, uri: &str) {
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(uri)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+}
+
+// --- Tests ---
 
 #[tokio::test]
 async fn test_operational_endpoints() {
@@ -71,10 +202,12 @@ async fn test_operational_endpoints() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    assert_eq!(&body[..], b"OK");
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+        "OK"
+    );
 
     // 2. List Drivers
     let response = app
@@ -92,45 +225,17 @@ async fn test_operational_endpoints() {
         .await
         .unwrap();
     let drivers: Vec<String> = serde_json::from_slice(&body).unwrap();
-    assert!(
-        drivers.contains(&"sqlite".to_string()),
-        "Drivers list should contain 'sqlite'"
-    );
+    assert!(drivers.contains(&"sqlite".to_string()));
 }
 
 #[tokio::test]
 async fn test_full_lifecycle_sqlite() {
     let app = app().await;
 
-    // 1. Create Database (SQLite Memory)
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/databases")
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    r#"{
-                    "driver": "sqlite",
-                    "options": { "uri": ":memory:" }
-                }"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let body_json: Value = serde_json::from_slice(&body_bytes).unwrap();
-    let db_id = body_json["id"].as_str().unwrap().to_string();
+    let db_id = create_test_db(&app).await;
     println!("Created Database ID: {}", db_id);
 
-    // 2. List Databases (Verify it appears)
+    // List Databases
     let response = app
         .clone()
         .oneshot(
@@ -141,74 +246,39 @@ async fn test_full_lifecycle_sqlite() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
     let dbs: Vec<Value> = serde_json::from_slice(&body).unwrap();
-    assert!(
-        dbs.iter().any(|db| db["id"] == db_id),
-        "Created database should appear in list"
-    );
+    assert!(dbs.iter().any(|db| db["id"] == db_id));
 
-    // 3. Create Connection
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(&format!("/databases/{}/connections", db_id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let body_json: Value = serde_json::from_slice(&body_bytes).unwrap();
-    let conn_id = body_json["id"].as_str().unwrap().to_string();
+    let conn_id = create_test_conn(&app, &db_id).await;
     println!("Created Connection ID: {}", conn_id);
 
-    // 4. Delete Connection (Release to pool)
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(&format!("/connections/{}", conn_id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-    // 5. Delete Database
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(&format!("/databases/{}", db_id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    delete_resource(&app, &format!("/connections/{}", conn_id)).await;
+    delete_resource(&app, &format!("/databases/{}", db_id)).await;
 }
 
 #[tokio::test]
 async fn test_connection_pooling_limits() {
     let app = app().await;
+    let db_id = create_test_db(&app).await;
 
-    // 1. Create Database
+    let mut conn_ids = Vec::new();
+    for _ in 0..5 {
+        conn_ids.push(create_test_conn(&app, &db_id).await);
+    }
+    println!("Acquired {} connections", conn_ids.len());
+
+    for id in conn_ids {
+        delete_resource(&app, &format!("/connections/{}", id)).await;
+    }
+}
+
+#[tokio::test]
+async fn test_connection_actions() {
+    let app = app().await;
+    // Manual creation to test options
     let response = app
         .clone()
         .oneshot(
@@ -223,94 +293,40 @@ async fn test_connection_pooling_limits() {
         )
         .await
         .unwrap();
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let db_id = serde_json::from_slice::<Value>(&body_bytes).unwrap()["id"]
+    let db_id = serde_json::from_slice::<Value>(&body).unwrap()["id"]
         .as_str()
         .unwrap()
         .to_string();
 
-    // 2. Acquire multiple connections
-    let mut conn_ids = Vec::new();
-    for _ in 0..5 {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(&format!("/databases/{}/connections", db_id))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let id = serde_json::from_slice::<Value>(&body).unwrap()["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        conn_ids.push(id);
-    }
-
-    println!("Acquired {} connections", conn_ids.len());
-
-    // 3. Release them all
-    for id in conn_ids {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri(&format!("/connections/{}", id))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    }
-}
-
-#[tokio::test]
-async fn test_connection_actions() {
-    let app = app().await;
-
-    // 1. Create Database
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/databases")
-                .header("Content-Type", "application/json")
-                .body(Body::from(r#"{ "driver": "sqlite", "options": { "uri": ":memory:" } }"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let db_id = serde_json::from_slice::<Value>(&body_bytes).unwrap()["id"].as_str().unwrap().to_string();
-
-    // 2. Create Connection (with auto-commit disabled)
-    let response = app.clone()
+    // Create Connection (auto-commit false)
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri(&format!("/databases/{}/connections", db_id))
                 .header("Content-Type", "application/json")
-                .body(Body::from(r#"{ "options": { "adbc.connection.autocommit": "false" } }"#))
+                .body(Body::from(
+                    r#"{ "options": { "adbc.connection.autocommit": "false" } }"#,
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let conn_id = serde_json::from_slice::<Value>(&body_bytes).unwrap()["id"].as_str().unwrap().to_string();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let conn_id = serde_json::from_slice::<Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    // 3. Commit connection
-    let response = app.clone()
+    // Commit
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -320,16 +336,11 @@ async fn test_connection_actions() {
         )
         .await
         .unwrap();
-    if response.status() != StatusCode::NO_CONTENT {
-        let status = response.status();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let body_str = String::from_utf8_lossy(&body);
-        eprintln!("Commit failed with status: {}. Body: {}", status, body_str);
-        panic!("Commit failed: {}", body_str);
-    }
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    // 4. Rollback connection
-    let response = app.clone()
+    // Rollback
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -339,16 +350,11 @@ async fn test_connection_actions() {
         )
         .await
         .unwrap();
-    if response.status() != StatusCode::NO_CONTENT {
-        let status = response.status();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let body_str = String::from_utf8_lossy(&body);
-        eprintln!("Rollback failed with status: {}. Body: {}", status, body_str);
-        panic!("Rollback failed: {}", body_str);
-    }
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    // 5. Cancel operation (no-op for SQLite without active query, but should not error, or return 501)
-    let response = app.clone()
+    // Cancel
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -358,38 +364,239 @@ async fn test_connection_actions() {
         )
         .await
         .unwrap();
-    
-    let status = response.status();
-    if status != StatusCode::NO_CONTENT && status != StatusCode::NOT_IMPLEMENTED {
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let body_str = String::from_utf8_lossy(&body);
-        eprintln!("Cancel failed with unexpected status: {}. Body: {}", status, body_str);
-        panic!("Cancel failed with unexpected status: {}", status);
-    }
-    // success if 204 or 501
+    assert!(
+        response.status() == StatusCode::NO_CONTENT
+            || response.status() == StatusCode::NOT_IMPLEMENTED
+    );
 
-    // Cleanup
-    let _ = app.clone().oneshot(
-        Request::builder()
-            .method("DELETE")
-            .uri(&format!("/connections/{}", conn_id))
-            .body(Body::empty())
+    delete_resource(&app, &format!("/connections/{}", conn_id)).await;
+    delete_resource(&app, &format!("/databases/{}", db_id)).await;
+}
+
+#[tokio::test]
+async fn test_statement_lifecycle() {
+    let app = app().await;
+    let db_id = create_test_db(&app).await;
+    let conn_id = create_test_conn(&app, &db_id).await;
+    let stmt_id = create_test_stmt(&app, &conn_id).await;
+
+    // Set SQL
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/sql", stmt_id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    r#"{ "query": "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)" }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // Prepare
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/prepare", stmt_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // Execute Update
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/execute_update", stmt_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    delete_resource(&app, &format!("/statements/{}", stmt_id)).await;
+    delete_resource(&app, &format!("/connections/{}", conn_id)).await;
+    delete_resource(&app, &format!("/databases/{}", db_id)).await;
+}
+
+#[tokio::test]
+async fn test_metadata_functions() {
+    let app = app().await;
+    let db_id = create_test_db(&app).await;
+    let conn_id = create_test_conn(&app, &db_id).await;
+
+    let stmt_id = create_test_stmt(&app, &conn_id).await;
+    exec_update(&app, &stmt_id, "CREATE TABLE meta_test (id INT, val TEXT)").await;
+
+    // Get Info
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&format!("/connections/{}/info", conn_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let info: Vec<Value> = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
             .unwrap(),
-    ).await;
-    let _ = app.oneshot(
-        Request::builder()
-            .method("DELETE")
-            .uri(&format!("/databases/{}", db_id))
-            .body(Body::empty())
+    )
+    .unwrap();
+    assert!(!info.is_empty());
+
+    // Get Table Types
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&format!("/connections/{}/table-types", conn_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let types: Vec<Value> = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
             .unwrap(),
-    ).await;
+    )
+    .unwrap();
+    assert!(!types.is_empty());
+
+    // Get Objects
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&format!("/connections/{}/objects", conn_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let objects: Vec<Value> = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(objects.len() >= 0);
+
+    // Get Schema
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&format!("/connections/{}/tables/meta_test/schema", conn_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let schema: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(schema["fields"].as_array().unwrap().len(), 2);
+
+    delete_resource(&app, &format!("/connections/{}", conn_id)).await;
+    delete_resource(&app, &format!("/databases/{}", db_id)).await;
+}
+
+#[tokio::test]
+async fn test_execute_query() {
+    let app = app().await;
+    let db_id = create_test_db(&app).await;
+    let conn_id = create_test_conn(&app, &db_id).await;
+
+    // Create Table
+    let stmt_id = create_test_stmt(&app, &conn_id).await;
+    exec_update(&app, &stmt_id, "CREATE TABLE query_test (id INT, val TEXT)").await;
+    delete_resource(&app, &format!("/statements/{}", stmt_id)).await;
+
+    // Insert Data
+    let stmt_id = create_test_stmt(&app, &conn_id).await;
+    exec_update(
+        &app,
+        &stmt_id,
+        "INSERT INTO query_test VALUES (1, 'alpha'), (2, 'beta')",
+    )
+    .await;
+    delete_resource(&app, &format!("/statements/{}", stmt_id)).await;
+
+    // Select Data
+    let stmt_id = create_test_stmt(&app, &conn_id).await;
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/sql", stmt_id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    r#"{ "query": "SELECT * FROM query_test ORDER BY id" }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/statements/{}/execute", stmt_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let rows: Vec<Value> = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["id"], 1);
+    assert_eq!(rows[0]["val"], "alpha");
+
+    delete_resource(&app, &format!("/statements/{}", stmt_id)).await;
+    delete_resource(&app, &format!("/connections/{}", conn_id)).await;
+    delete_resource(&app, &format!("/databases/{}", db_id)).await;
 }
 
 #[tokio::test]
 async fn test_error_handling() {
     let app = app().await;
 
-    // 1. Create Database with invalid driver
     let response = app
         .clone()
         .oneshot(
@@ -404,7 +611,6 @@ async fn test_error_handling() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    // 2. Delete non-existent Database
     let response = app
         .clone()
         .oneshot(
@@ -418,7 +624,6 @@ async fn test_error_handling() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // 3. Create Connection on non-existent Database
     let response = app
         .clone()
         .oneshot(
@@ -432,7 +637,6 @@ async fn test_error_handling() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // 4. Delete non-existent Connection
     let response = app
         .clone()
         .oneshot(
@@ -446,215 +650,12 @@ async fn test_error_handling() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // 5. Commit non-existent connection
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/connections/non-existent-id/commit")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    // 6. Rollback non-existent connection
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/connections/non-existent-id/rollback")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    // 7. Cancel non-existent connection
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/connections/non-existent-id/cancel")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-#[tokio::test]
-async fn test_statement_lifecycle() {
-    let app = app().await;
-
-    // 1. Create Database
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/databases")
-                .header("Content-Type", "application/json")
-                .body(Body::from(r#"{ "driver": "sqlite", "options": { "uri": ":memory:" } }"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let db_id = serde_json::from_slice::<Value>(&body_bytes).unwrap()["id"].as_str().unwrap().to_string();
-
-    // 2. Create Connection
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(&format!("/databases/{}/connections", db_id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let conn_id = serde_json::from_slice::<Value>(&body_bytes).unwrap()["id"].as_str().unwrap().to_string();
-
-    // 3. Create Statement
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(&format!("/connections/{}/statements", conn_id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let stmt_id = serde_json::from_slice::<Value>(&body_bytes).unwrap()["id"].as_str().unwrap().to_string();
-    println!("Created Statement ID: {}", stmt_id);
-
-    // 4. Set SQL Query
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(&format!("/statements/{}/sql", stmt_id))
-                .header("Content-Type", "application/json")
-                .body(Body::from(r#"{ "query": "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)" }"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-    // 5. Prepare Statement (Optional but good to test)
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(&format!("/statements/{}/prepare", stmt_id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-    // 6. Execute Update
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(&format!("/statements/{}/execute_update", stmt_id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-    // 7. Delete Statement
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(&format!("/statements/{}", stmt_id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-    // Cleanup
-    let _ = app.clone().oneshot(Request::builder().method("DELETE").uri(&format!("/connections/{}", conn_id)).body(Body::empty()).unwrap()).await;
-    let _ = app.oneshot(Request::builder().method("DELETE").uri(&format!("/databases/{}", db_id)).body(Body::empty()).unwrap()).await;
-}
-
-#[tokio::test]
-async fn test_statement_error_handling() {
-    let app = app().await;
-
-    // 1. Create Statement on non-existent Connection
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/connections/non-existent-id/statements")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    // 2. Set SQL on non-existent Statement
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/statements/non-existent-id/sql")
-                .header("Content-Type", "application/json")
-                .body(Body::from(r#"{ "query": "SELECT 1" }"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    // 3. Prepare non-existent Statement
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/statements/non-existent-id/prepare")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    // 4. Execute Update on non-existent Statement
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/statements/non-existent-id/execute_update")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    // 5. Delete non-existent Statement
-    let response = app.clone()
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri("/statements/non-existent-id")
                 .body(Body::empty())
                 .unwrap(),
         )

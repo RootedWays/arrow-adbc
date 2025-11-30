@@ -28,7 +28,9 @@ clap = { version = "4.4", features = ["derive", "env"] }
 # Using the same relative paths as the existing 'core' crate in this repo
 adbc_core = { path = "../../rust/core" }
 adbc_driver_manager = { path = "../../rust/driver_manager" }
-arrow = { version = "57.1.0", features = ["ipc"] } # Match version from core/Cargo.toml if possible, but 53.1.0 is safe
+arrow = { version = "57.1.0", features = ["ipc", "json"] }
+arrow-json = "57.1.0"
+arrow-schema = { version = "57.1.0", features = ["serde"] }
 deadpool = "0.12.3"
 async-trait = "0.1.89"
 tower = { version = "0.5.2", features = ["util"] }

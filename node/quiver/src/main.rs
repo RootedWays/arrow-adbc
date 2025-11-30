@@ -1,10 +1,15 @@
 use adbc_core::{
-    options::{OptionConnection, OptionDatabase, OptionStatement, OptionValue},
+    options::{ObjectDepth, OptionConnection, OptionDatabase, OptionValue},
     Connection, Driver, Optionable, Statement,
 };
 use adbc_driver_manager::{ManagedConnection, ManagedStatement};
+use arrow::array::{
+    Array, BooleanArray, Int32Array, Int64Array, StringArray, UInt32Array, UnionArray,
+};
+use arrow_json::writer::LineDelimited;
+use arrow_json::WriterBuilder;
 use axum::{
-    extract::Path,
+    extract::{Path, Query},
     http::StatusCode,
     routing::{delete, get, post},
     Extension, Json, Router,
@@ -44,6 +49,23 @@ struct AppState {
     database_registry: Arc<DatabaseRegistry>,
     connection_registry: Arc<ConnectionRegistry>,
     statement_registry: Arc<StatementRegistry>,
+}
+
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+struct GetObjectsParams {
+    depth: Option<u8>,
+    catalog: Option<String>,
+    db_schema: Option<String>,
+    table_name: Option<String>,
+    #[serde(default)]
+    table_type: Option<Vec<String>>,
+    column_name: Option<String>,
+}
+
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+struct GetTableSchemaParams {
+    catalog: Option<String>,
+    db_schema: Option<String>,
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
@@ -98,13 +120,18 @@ struct SetSqlQueryRequest {
         delete_statement,
         set_statement_sql_query,
         prepare_statement,
-        execute_statement_update
+        execute_statement_update,
+        execute_statement_query,
+        get_connection_info,
+        get_connection_objects,
+        get_connection_table_types,
+        get_connection_table_schema
     ),
     components(schemas(
-        CreateDatabaseRequest, 
-        CreateDatabaseResponse, 
-        CreateConnectionRequest, 
-        CreateConnectionResponse, 
+        CreateDatabaseRequest,
+        CreateDatabaseResponse,
+        CreateConnectionRequest,
+        CreateConnectionResponse,
         CreateStatementResponse,
         SetSqlQueryRequest,
         crate::database_manager::DatabaseInfo
@@ -170,11 +197,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/connections/:id/commit", post(commit_connection))
         .route("/connections/:id/rollback", post(rollback_connection))
         .route("/connections/:id/cancel", post(cancel_connection))
+        .route("/connections/:id/info", get(get_connection_info))
+        .route("/connections/:id/objects", get(get_connection_objects))
+        .route(
+            "/connections/:id/table-types",
+            get(get_connection_table_types),
+        )
+        .route(
+            "/connections/:id/tables/:table_name/schema",
+            get(get_connection_table_schema),
+        )
         .route("/connections/:id/statements", post(create_statement))
         .route("/statements/:id", delete(delete_statement))
         .route("/statements/:id/sql", post(set_statement_sql_query))
         .route("/statements/:id/prepare", post(prepare_statement))
-        .route("/statements/:id/execute_update", post(execute_statement_update))
+        .route("/statements/:id/execute", post(execute_statement_query))
+        .route(
+            "/statements/:id/execute_update",
+            post(execute_statement_update),
+        )
         .layer(Extension(state));
 
     // Run it
@@ -357,10 +398,14 @@ async fn create_connection(
                 _ => OptionConnection::Other(key),
             };
             let opt_val = OptionValue::String(value);
-            
+
             let managed_conn = &mut **connection;
-            Optionable::set_option(managed_conn, opt_key, opt_val)
-                .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to set option: {}", e)))?;
+            Optionable::set_option(managed_conn, opt_key, opt_val).map_err(|e| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("Failed to set option: {}", e),
+                )
+            })?;
         }
     }
 
@@ -411,26 +456,33 @@ async fn handle_connection_action(
     action_name: &str,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let conn_id = id.0;
-    let conn_entry = state.connection_registry.get(&conn_id).await
-        .ok_or((StatusCode::NOT_FOUND, format!("Connection '{}' not found", conn_id)))?;
+    let conn_entry = state.connection_registry.get(&conn_id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Connection '{}' not found", conn_id),
+    ))?;
 
     let mut conn_guard = conn_entry.connection.lock().await;
     let managed_conn = &mut ***conn_guard;
-    
-    action(managed_conn)
-        .map_err(|e| {
-            let status = match e.status {
-                adbc_core::error::Status::NotImplemented => StatusCode::NOT_IMPLEMENTED,
-                adbc_core::error::Status::InvalidState => StatusCode::CONFLICT,
-                adbc_core::error::Status::InvalidArguments => StatusCode::BAD_REQUEST,
-                adbc_core::error::Status::NotFound => StatusCode::NOT_FOUND,
-                adbc_core::error::Status::AlreadyExists => StatusCode::CONFLICT,
-                adbc_core::error::Status::Unauthenticated => StatusCode::UNAUTHORIZED,
-                adbc_core::error::Status::IO => StatusCode::SERVICE_UNAVAILABLE,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            (status, format!("Failed to {}: {} (ADBC Status: {:?})", action_name, e.message, e.status))
-        })?;
+
+    action(managed_conn).map_err(|e| {
+        let status = match e.status {
+            adbc_core::error::Status::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+            adbc_core::error::Status::InvalidState => StatusCode::CONFLICT,
+            adbc_core::error::Status::InvalidArguments => StatusCode::BAD_REQUEST,
+            adbc_core::error::Status::NotFound => StatusCode::NOT_FOUND,
+            adbc_core::error::Status::AlreadyExists => StatusCode::CONFLICT,
+            adbc_core::error::Status::Unauthenticated => StatusCode::UNAUTHORIZED,
+            adbc_core::error::Status::IO => StatusCode::SERVICE_UNAVAILABLE,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        (
+            status,
+            format!(
+                "Failed to {}: {} (ADBC Status: {:?})",
+                action_name, e.message, e.status
+            ),
+        )
+    })?;
 
     tracing::info!("Connection '{}' {}.", conn_id, action_name);
     Ok(StatusCode::NO_CONTENT)
@@ -513,12 +565,14 @@ async fn create_statement(
     Extension(state): Extension<Arc<AppState>>,
     Path(conn_id): Path<String>,
 ) -> Result<Json<CreateStatementResponse>, (StatusCode, String)> {
-    let conn_entry = state.connection_registry.get(&conn_id).await
-        .ok_or((StatusCode::NOT_FOUND, format!("Connection '{}' not found", conn_id)))?;
+    let conn_entry = state.connection_registry.get(&conn_id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Connection '{}' not found", conn_id),
+    ))?;
 
     let mut conn_guard = conn_entry.connection.lock().await;
     let managed_conn = &mut ***conn_guard;
-    
+
     let statement = managed_conn.new_statement().map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -528,7 +582,11 @@ async fn create_statement(
 
     let stmt_id = state.statement_registry.register(statement).await;
 
-    tracing::info!("Created statement '{}' from connection '{}'", stmt_id, conn_id);
+    tracing::info!(
+        "Created statement '{}' from connection '{}'",
+        stmt_id,
+        conn_id
+    );
     Ok(Json(CreateStatementResponse { id: stmt_id }))
 }
 
@@ -567,25 +625,32 @@ async fn handle_statement_action(
     action_name: &str,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let stmt_id = id.0;
-    let stmt_entry = state.statement_registry.get(&stmt_id).await
-        .ok_or((StatusCode::NOT_FOUND, format!("Statement '{}' not found", stmt_id)))?;
+    let stmt_entry = state.statement_registry.get(&stmt_id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Statement '{}' not found", stmt_id),
+    ))?;
 
     let mut stmt_guard = stmt_entry.statement.lock().await;
-    
-    action(&mut *stmt_guard)
-        .map_err(|e| {
-             let status = match e.status {
-                adbc_core::error::Status::NotImplemented => StatusCode::NOT_IMPLEMENTED,
-                adbc_core::error::Status::InvalidState => StatusCode::CONFLICT,
-                adbc_core::error::Status::InvalidArguments => StatusCode::BAD_REQUEST,
-                adbc_core::error::Status::NotFound => StatusCode::NOT_FOUND,
-                adbc_core::error::Status::AlreadyExists => StatusCode::CONFLICT,
-                adbc_core::error::Status::Unauthenticated => StatusCode::UNAUTHORIZED,
-                adbc_core::error::Status::IO => StatusCode::SERVICE_UNAVAILABLE,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            (status, format!("Failed to {}: {} (ADBC Status: {:?})", action_name, e.message, e.status))
-        })?;
+
+    action(&mut *stmt_guard).map_err(|e| {
+        let status = match e.status {
+            adbc_core::error::Status::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+            adbc_core::error::Status::InvalidState => StatusCode::CONFLICT,
+            adbc_core::error::Status::InvalidArguments => StatusCode::BAD_REQUEST,
+            adbc_core::error::Status::NotFound => StatusCode::NOT_FOUND,
+            adbc_core::error::Status::AlreadyExists => StatusCode::CONFLICT,
+            adbc_core::error::Status::Unauthenticated => StatusCode::UNAUTHORIZED,
+            adbc_core::error::Status::IO => StatusCode::SERVICE_UNAVAILABLE,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        (
+            status,
+            format!(
+                "Failed to {}: {} (ADBC Status: {:?})",
+                action_name, e.message, e.status
+            ),
+        )
+    })?;
 
     tracing::info!("Statement '{}' {}.", stmt_id, action_name);
     Ok(StatusCode::NO_CONTENT)
@@ -610,7 +675,13 @@ async fn set_statement_sql_query(
     id: Path<String>,
     Json(payload): Json<SetSqlQueryRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    handle_statement_action(state, id, move |stmt| stmt.set_sql_query(&payload.query), "set SQL query").await
+    handle_statement_action(
+        state,
+        id,
+        move |stmt| stmt.set_sql_query(&payload.query),
+        "set SQL query",
+    )
+    .await
 }
 
 #[utoipa::path(
@@ -650,5 +721,370 @@ async fn execute_statement_update(
     state: Extension<Arc<AppState>>,
     id: Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    handle_statement_action(state, id, |stmt| stmt.execute_update().map(|_| ()), "execute update").await
+    handle_statement_action(
+        state,
+        id,
+        |stmt| stmt.execute_update().map(|_| ()),
+        "execute update",
+    )
+    .await
+}
+
+#[utoipa::path(
+    post,
+    path = "/statements/{id}/execute",
+    params((
+        "id" = String,
+        Path,
+        description = "Statement ID"
+    )),
+    responses((
+        status = 200,
+        description = "Query executed",
+        body = Vec<Value>
+    ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to execute query"))
+)]
+async fn execute_statement_query(
+    Extension(state): Extension<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let stmt_id = id;
+    let stmt_entry = state.statement_registry.get(&stmt_id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Statement '{}' not found", stmt_id),
+    ))?;
+
+    let mut stmt_guard = stmt_entry.statement.lock().await;
+
+    let reader = stmt_guard.execute().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to execute query: {}", e),
+        )
+    })?;
+
+    serialize_reader(reader)
+}
+
+fn serialize_reader<R: arrow::array::RecordBatchReader>(
+    reader: R,
+) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let mut rows = Vec::new();
+    for batch in reader {
+        let batch = batch.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Arrow error: {}", e),
+            )
+        })?;
+        let mut buf = Vec::new();
+        let mut writer = WriterBuilder::new().build::<_, LineDelimited>(&mut buf);
+        writer.write(&batch).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("JSON write error: {}", e),
+            )
+        })?;
+        writer.finish().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("JSON finish error: {}", e),
+            )
+        })?;
+
+        let json_str = String::from_utf8(buf).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("UTF8 error: {}", e),
+            )
+        })?;
+        for line in json_str.lines() {
+            if !line.is_empty() {
+                let val: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("JSON parse error: {}", e),
+                    )
+                })?;
+                rows.push(val);
+            }
+        }
+    }
+    Ok(Json(rows))
+}
+
+fn serialize_info_reader<R: arrow::array::RecordBatchReader>(
+    reader: R,
+) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let mut rows = Vec::new();
+    for batch in reader {
+        let batch = batch.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Arrow error: {}", e),
+            )
+        })?;
+
+        let info_codes = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .ok_or((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Expected UInt32 for info_code".to_string(),
+            ))?;
+        let info_values = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<UnionArray>()
+            .ok_or((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Expected Union for info_value".to_string(),
+            ))?;
+
+        for i in 0..batch.num_rows() {
+            let code = info_codes.value(i);
+            let type_id = info_values.type_id(i);
+            let value_offset = info_values.value_offset(i);
+            let child = info_values.child(type_id);
+
+            // ADBC info_value children (mapped by convention/spec, though dynamic lookup is safer this is a quick fix):
+            // 0: string_value (Utf8)
+            // 1: bool_value (Boolean)
+            // 2: int64_value (Int64)
+            // 3: int32_bitmask (Int32)
+            // 4: string_list (List<Utf8>) - Not handled
+            // 5: int32_to_int32_list_map (Map) - Not handled
+
+            let val = match type_id {
+                0 => {
+                    // String
+                    let arr = child.as_any().downcast_ref::<StringArray>().unwrap();
+                    if arr.is_null(value_offset) {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::Value::String(arr.value(value_offset).to_string())
+                    }
+                }
+                1 => {
+                    // Bool
+                    let arr = child.as_any().downcast_ref::<BooleanArray>().unwrap();
+                    if arr.is_null(value_offset) {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::Value::Bool(arr.value(value_offset))
+                    }
+                }
+                2 => {
+                    // Int64
+                    let arr = child.as_any().downcast_ref::<Int64Array>().unwrap();
+                    if arr.is_null(value_offset) {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(arr.value(value_offset))
+                    }
+                }
+                3 => {
+                    // Int32
+                    let arr = child.as_any().downcast_ref::<Int32Array>().unwrap();
+                    if arr.is_null(value_offset) {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(arr.value(value_offset))
+                    }
+                }
+                _ => serde_json::Value::String(format!("Unsupported Union Variant {}", type_id)),
+            };
+
+            rows.push(serde_json::json!({
+                "info_name": code,
+                "info_value": val
+            }));
+        }
+    }
+    Ok(Json(rows))
+}
+
+#[utoipa::path(
+    get,
+    path = "/connections/{id}/info",
+    params((
+        "id" = String,
+        Path,
+        description = "Connection ID"
+    )),
+    responses((
+        status = 200,
+        description = "Database metadata info",
+        body = Vec<Value>
+    ), (status = 404, description = "Connection not found"))
+)]
+async fn get_connection_info(
+    Extension(state): Extension<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let conn_entry = state.connection_registry.get(&id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Connection '{}' not found", id),
+    ))?;
+
+    let mut conn_guard = conn_entry.connection.lock().await;
+    let managed_conn = &mut ***conn_guard;
+
+    // Get all info codes
+    let reader = managed_conn.get_info(None).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to get info: {}", e),
+        )
+    })?;
+
+    serialize_info_reader(reader)
+}
+
+#[utoipa::path(
+    get,
+    path = "/connections/{id}/objects",
+    params(
+        ("id" = String, Path, description = "Connection ID"),
+        GetObjectsParams
+    ),
+    responses((
+        status = 200,
+        description = "Database objects",
+        body = Vec<Value>
+    ), (status = 404, description = "Connection not found"))
+)]
+async fn get_connection_objects(
+    Extension(state): Extension<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<GetObjectsParams>,
+) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let conn_entry = state.connection_registry.get(&id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Connection '{}' not found", id),
+    ))?;
+
+    let mut conn_guard = conn_entry.connection.lock().await;
+    let managed_conn = &mut ***conn_guard;
+
+    let depth = match params.depth.unwrap_or(0) {
+        0 => ObjectDepth::All,
+        1 => ObjectDepth::Catalogs,
+        2 => ObjectDepth::Schemas,
+        3 => ObjectDepth::Tables,
+        4 => ObjectDepth::Columns,
+        _ => ObjectDepth::All,
+    };
+
+    let table_types = params
+        .table_type
+        .map(|v| v.into_iter().collect::<Vec<String>>());
+    let table_types_slices: Option<Vec<&str>> = table_types
+        .as_ref()
+        .map(|v| v.iter().map(|s| s.as_str()).collect());
+
+    let reader = managed_conn
+        .get_objects(
+            depth,
+            params.catalog.as_deref(),
+            params.db_schema.as_deref(),
+            params.table_name.as_deref(),
+            table_types_slices,
+            params.column_name.as_deref(),
+        )
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get objects: {}", e),
+            )
+        })?;
+
+    serialize_reader(reader)
+}
+
+#[utoipa::path(
+    get,
+    path = "/connections/{id}/table-types",
+    params((
+        "id" = String,
+        Path,
+        description = "Connection ID"
+    )),
+    responses((
+        status = 200,
+        description = "Table types",
+        body = Vec<Value>
+    ), (status = 404, description = "Connection not found"))
+)]
+async fn get_connection_table_types(
+    Extension(state): Extension<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let conn_entry = state.connection_registry.get(&id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Connection '{}' not found", id),
+    ))?;
+
+    let mut conn_guard = conn_entry.connection.lock().await;
+    let managed_conn = &mut ***conn_guard;
+
+    let reader = managed_conn.get_table_types().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to get table types: {}", e),
+        )
+    })?;
+
+    serialize_reader(reader)
+}
+
+#[utoipa::path(
+    get,
+    path = "/connections/{id}/tables/{table_name}/schema",
+    params(
+        ("id" = String, Path, description = "Connection ID"),
+        ("table_name" = String, Path, description = "Table Name"),
+        GetTableSchemaParams
+    ),
+    responses((
+        status = 200,
+        description = "Table schema",
+        body = Value
+    ), (status = 404, description = "Connection not found"))
+)]
+async fn get_connection_table_schema(
+    Extension(state): Extension<Arc<AppState>>,
+    Path((id, table_name)): Path<(String, String)>,
+    Query(params): Query<GetTableSchemaParams>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let conn_entry = state.connection_registry.get(&id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Connection '{}' not found", id),
+    ))?;
+
+    let mut conn_guard = conn_entry.connection.lock().await;
+    let managed_conn = &mut ***conn_guard;
+
+    let schema = managed_conn
+        .get_table_schema(
+            params.catalog.as_deref(),
+            params.db_schema.as_deref(),
+            &table_name,
+        )
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get table schema: {}", e),
+            )
+        })?;
+
+    let json_val = serde_json::to_value(schema).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Schema serialization error: {}", e),
+        )
+    })?;
+
+    Ok(Json(json_val))
 }
