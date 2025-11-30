@@ -75,7 +75,7 @@ pub struct DatabaseEntry {
     pub id: String,
     pub driver_name: String,
     // Store protected database
-    pub database: Arc<Mutex<ManagedDatabase>>,
+    pub _database: Arc<Mutex<ManagedDatabase>>,
     pub pool: AdbcConnectionPool,
 }
 
@@ -120,7 +120,7 @@ impl DatabaseRegistry {
         let entry = DatabaseEntry {
             id: id.clone(),
             driver_name,
-            database: db_arc,
+            _database: db_arc,
             pool,
         };
 

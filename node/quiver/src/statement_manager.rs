@@ -1,10 +1,10 @@
 use adbc_driver_manager::ManagedStatement;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 pub struct StatementEntry {
-    pub id: String,
+    pub _id: String,
     pub statement: Mutex<ManagedStatement>,
 }
 
@@ -22,7 +22,7 @@ impl StatementRegistry {
     pub async fn register(&self, statement: ManagedStatement) -> String {
         let id = Uuid::new_v4().to_string();
         let entry = Arc::new(StatementEntry {
-            id: id.clone(),
+            _id: id.clone(),
             statement: Mutex::new(statement),
         });
 

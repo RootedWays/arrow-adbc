@@ -306,6 +306,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d27609cd7dd45f006abae27995c2729ef6f4b9361cde1ddd019dc31a5aa017e0"
 dependencies = [
  "bitflags",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1238,6 +1240,8 @@ dependencies = [
  "adbc_core",
  "adbc_driver_manager",
  "arrow",
+ "arrow-json",
+ "arrow-schema",
  "async-trait",
  "axum",
  "clap",
