@@ -141,7 +141,7 @@ struct SetSqlQueryRequest {
         description = "ADBC Gateway API"
     ))
 )]
-struct ApiDoc;
+pub(crate) struct ApiDoc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

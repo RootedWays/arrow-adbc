@@ -9,6 +9,383 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/connections/{id}": {
+      "delete": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "delete_connection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connection ID to release",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Connection released"
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        }
+      }
+    },
+    "/connections/{id}/cancel": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "cancel_connection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connection ID to cancel current operation",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Operation cancelled"
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to cancel operation"
+          }
+        }
+      }
+    },
+    "/connections/{id}/commit": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "commit_connection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connection ID to commit transaction",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Transaction committed"
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to commit transaction"
+          }
+        }
+      }
+    },
+    "/connections/{id}/info": {
+      "get": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "get_connection_info",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connection ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Database metadata info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        }
+      }
+    },
+    "/connections/{id}/objects": {
+      "get": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "get_connection_objects",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connection ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "catalog",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "db_schema",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "table_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "table_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "nullable": true
+            }
+          },
+          {
+            "name": "column_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Database objects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        }
+      }
+    },
+    "/connections/{id}/rollback": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "rollback_connection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connection ID to rollback transaction",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Transaction rolled back"
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to rollback transaction"
+          }
+        }
+      }
+    },
+    "/connections/{id}/statements": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "create_statement",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connection ID to create statement from",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Statement created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateStatementResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to create statement"
+          }
+        }
+      }
+    },
+    "/connections/{id}/table-types": {
+      "get": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "get_connection_table_types",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connection ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Table types",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        }
+      }
+    },
+    "/connections/{id}/tables/{table_name}/schema": {
+      "get": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "get_connection_table_schema",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Connection ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "table_name",
+            "in": "path",
+            "description": "Table Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "catalog",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "db_schema",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Table schema",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        }
+      }
+    },
     "/databases": {
       "get": {
         "tags": [
@@ -93,6 +470,58 @@
         }
       }
     },
+    "/databases/{id}/connections": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "create_connection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database ID to acquire connection from",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateConnectionRequest"
+                  }
+                ],
+                "nullable": true
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "description": "Connection acquired successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateConnectionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Database not found"
+          },
+          "500": {
+            "description": "Failed to acquire connection"
+          }
+        }
+      }
+    },
     "/drivers": {
       "get": {
         "tags": [
@@ -135,10 +564,198 @@
           }
         }
       }
+    },
+    "/statements/{id}": {
+      "delete": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "delete_statement",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Statement ID to release",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Statement released"
+          },
+          "404": {
+            "description": "Statement not found"
+          }
+        }
+      }
+    },
+    "/statements/{id}/execute": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "execute_statement_query",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Statement ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Query executed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to execute query"
+          }
+        }
+      }
+    },
+    "/statements/{id}/execute_update": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "execute_statement_update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Statement ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Update executed"
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to execute update"
+          }
+        }
+      }
+    },
+    "/statements/{id}/prepare": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "prepare_statement",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Statement ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Statement prepared"
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to prepare statement"
+          }
+        }
+      }
+    },
+    "/statements/{id}/sql": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "set_statement_sql_query",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Statement ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSqlQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "SQL query set"
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to set SQL query"
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "CreateConnectionRequest": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": "{\"adbc.connection.autocommit\": \"false\"}"
+          }
+        }
+      },
+      "CreateConnectionResponse": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
       "CreateDatabaseRequest": {
         "type": "object",
         "required": [
@@ -147,18 +764,28 @@
         "properties": {
           "driver": {
             "type": "string",
-            "example": "sqlite"
+            "example": "{\"uri\": \":memory:\"}"
           },
           "options": {
             "type": "object",
             "additionalProperties": {
               "type": "string"
-            },
-            "example": "{\"uri\": \":memory:\"}"
+            }
           }
         }
       },
       "CreateDatabaseResponse": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateStatementResponse": {
         "type": "object",
         "required": [
           "id"
@@ -180,6 +807,17 @@
             "type": "string"
           },
           "id": {
+            "type": "string"
+          }
+        }
+      },
+      "SetSqlQueryRequest": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
             "type": "string"
           }
         }
