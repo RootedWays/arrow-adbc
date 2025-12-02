@@ -15,48 +15,93 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import test from 'ava';
-import { withSqlite } from './test_utils';
+import anyTest, { TestFn } from 'ava';
+import { createSqliteDatabase, createTestTable } from './test_utils';
+import { AdbcDatabase, AdbcConnection, AdbcStatement } from '../lib/index.js';
 
-test('transaction: commit and rollback', async (t) => {
-  await withSqlite(async (db, conn, stmt) => {
-    // Disable autocommit
+interface TestContext {
+  db: AdbcDatabase;
+  conn: AdbcConnection;
+  stmt: AdbcStatement;
+}
+
+const test = anyTest as TestFn<TestContext>;
+
+test.before(async (t) => {
+  const db = await createSqliteDatabase();
+  const conn = await db.connect();
+  const stmt = await conn.createStatement();
+  await createTestTable(stmt, "tx_test");
+  t.context = { db, conn, stmt };
+});
+
+test.after.always(async (t) => {
+  try {
+    if (t.context.stmt) await t.context.stmt.close();
+    if (t.context.conn) await t.context.conn.close();
+    if (t.context.db) await t.context.db.close();
+  } catch (e) {
+    // ignore
+  }
+});
+
+test.serial('transaction: rollback reverts changes', async (t) => {
+    const { conn } = t.context; // Use conn from context
     conn.setAutoCommit(false);
 
-    await stmt.setSqlQuery("CREATE TABLE tx_test (id INTEGER)");
-    await stmt.executeUpdate();
-    await conn.commit(); // Commit the CREATE TABLE
+    // Create a new statement for this transaction block to ensure isolation
+    const newStmt = await conn.createStatement();
+    try {
+        await newStmt.setSqlQuery("INSERT INTO tx_test (id) VALUES (1)");
+        await newStmt.executeUpdate();
 
-    // Transaction 1
-    await stmt.setSqlQuery("INSERT INTO tx_test (id) VALUES (1)");
-    await stmt.executeUpdate();
+        await conn.rollback();
+        t.pass("Rollback successful");
 
-    await conn.rollback();
-    t.pass("Rollback successful");
+        await newStmt.setSqlQuery("SELECT * FROM tx_test");
+        let reader = await newStmt.executeQuery();
+        let count = 0;
+        for await (const batch of reader) count += batch.numRows;
+        t.is(count, 0, "Table should be empty after rollback");
+    } finally {
+        await newStmt.close();
+    }
+});
 
-    // Verify empty
-    await stmt.setSqlQuery("SELECT * FROM tx_test");
-    let reader = await stmt.executeQuery();
-    let count = 0;
-    for await (const batch of reader) count += batch.numRows;
-    t.is(count, 0, "Table should be empty after rollback");
+test.serial('transaction: commit persists changes', async (t) => {
+    const { conn } = t.context; // Note: using conn from context, but creating new statement.
+    conn.setAutoCommit(false); // Ensure autocommit is off
 
-    // Commit test
-    // Transaction 2
-    // Use a new statement to be safe after rollback (as we discovered earlier)
-    const statement3 = await conn.createStatement();
-    await statement3.setSqlQuery("INSERT INTO tx_test (id) VALUES (2)");
-    await statement3.executeUpdate();
+    // Create a new statement for this test to ensure isolation, as per original test's cautious approach.
+    const newStmt = await conn.createStatement();
+    try {
+        await newStmt.setSqlQuery("INSERT INTO tx_test (id) VALUES (2)");
+        const affectedRows = await newStmt.executeUpdate();
+        t.is(affectedRows, 1, "INSERT should affect 1 row");
 
-    await conn.commit();
-    t.pass("Commit successful");
+        // Verify row is visible before commit (within the transaction)
+        await newStmt.setSqlQuery("SELECT * FROM tx_test");
+        let readerBeforeCommit = await newStmt.executeQuery();
+        let countBeforeCommit = 0;
+        for await (const batch of readerBeforeCommit) countBeforeCommit += batch.numRows;
+        t.is(countBeforeCommit, 1, "Table should have 1 row before commit");
 
-    // Verify 1 row
-    await statement3.setSqlQuery("SELECT * FROM tx_test");
-    reader = await statement3.executeQuery();
-    count = 0;
-    for await (const batch of reader) count += batch.numRows;
-    t.is(count, 1, "Table should have 1 row after commit");
-    await statement3.close();
-  });
+        await conn.commit();
+        t.pass("Commit successful");
+        
+        // ADBC Spec: "Calling commit or rollback on the connection may invalidate active statements."
+        // To ensure robust verification, create a fresh statement to read back the committed data.
+        const verifyStmt = await conn.createStatement();
+        try {
+            await verifyStmt.setSqlQuery("SELECT * FROM tx_test");
+            let reader = await verifyStmt.executeQuery();
+            let count = 0;
+            for await (const batch of reader) count += batch.numRows;
+            t.is(count, 1, "Table should have 1 row after commit");
+        } finally {
+            await verifyStmt.close();
+        }
+    } finally {
+        await newStmt.close();
+    }
 });

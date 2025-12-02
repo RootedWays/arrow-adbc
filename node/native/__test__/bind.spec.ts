@@ -15,16 +15,40 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import test from 'ava';
-import { withSqlite, createTestTable } from './test_utils';
+import anyTest, { TestFn } from 'ava';
+import { createSqliteDatabase, createTestTable } from './test_utils';
+import { AdbcDatabase, AdbcConnection, AdbcStatement } from '../lib/index.js';
 import { tableFromArrays } from 'apache-arrow';
 
-test('statement: bind and query data', async (t) => {
-  await withSqlite(async (db, conn, stmt) => {
-    // Create a table
-    await createTestTable(stmt, "my_table");
-    t.pass("Table created");
+interface TestContext {
+  db: AdbcDatabase;
+  conn: AdbcConnection;
+  stmt: AdbcStatement;
+}
 
+const test = anyTest as TestFn<TestContext>;
+
+test.before(async (t) => {
+  const db = await createSqliteDatabase();
+  const conn = await db.connect();
+  const stmt = await conn.createStatement();
+  await createTestTable(stmt, "bind_test");
+  t.context = { db, conn, stmt };
+});
+
+test.after.always(async (t) => {
+  try {
+    if (t.context.stmt) await t.context.stmt.close();
+    if (t.context.conn) await t.context.conn.close();
+    if (t.context.db) await t.context.db.close();
+  } catch (e) {
+    // ignore
+  }
+});
+
+test('statement: bind and query data', async (t) => {
+    const { stmt } = t.context;
+    
     // Prepare data to bind using tableFromArrays
     const recordBatchToBind = tableFromArrays({
         id: [null],
@@ -32,24 +56,24 @@ test('statement: bind and query data', async (t) => {
     });
 
     t.is(recordBatchToBind.numRows, 1, "Table to bind has 1 row");
+    
     // Bind data
     await stmt.bind(recordBatchToBind);
     t.pass("Data bound successfully");
 
     // Execute an insert (this will consume the bound data)
-    await stmt.setSqlQuery("INSERT INTO my_table (id, name) VALUES (?, ?)"); // ADBC uses ? for parameters
+    await stmt.setSqlQuery("INSERT INTO bind_test (id, name) VALUES (?, ?)");
     const insertResult = await stmt.executeUpdate();
     t.is(insertResult, 1, "INSERT should return 1 row affected");
     t.pass("Data inserted");
 
     // Query the data back
-    await stmt.setSqlQuery("SELECT id, name FROM my_table");
+    await stmt.setSqlQuery("SELECT id, name FROM bind_test");
     const reader = await stmt.executeQuery();
     t.pass("Executed SELECT query");
 
     let rowCount = 0;
     for await (const batch of reader) {
-        t.pass(`Read batch with ${batch.numRows} rows`);
         rowCount += batch.numRows;
         const idVector = batch.getChild("id");
         const nameVector = batch.getChild("name");
@@ -59,6 +83,4 @@ test('statement: bind and query data', async (t) => {
     }
 
     t.is(rowCount, 1, "Should have retrieved 1 row");
-    t.pass("Data verified");
-  });
 });

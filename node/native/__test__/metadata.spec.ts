@@ -15,55 +15,88 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import test from 'ava';
-import { withSqlite, createTestTable } from './test_utils';
+import anyTest, { TestFn } from 'ava';
+import { createSqliteDatabase, createTestTable, dumpReader } from './test_utils';
+import { AdbcDatabase, AdbcConnection, AdbcStatement } from '../lib/index.js';
 
-test('metadata: catalog functions', async (t) => {
-  await withSqlite(async (db, conn, stmt) => {
-    // Setup: Create a table to query metadata about
-    await createTestTable(stmt, "metadata_test");
+interface TestContext {
+  db: AdbcDatabase;
+  conn: AdbcConnection;
+  stmt: AdbcStatement;
+}
 
-    // 1. getTableTypes
-    const tableTypesReader = await conn.getTableTypes();
-    let tableTypesCount = 0;
-    let foundTableType = false;
-    for await (const batch of tableTypesReader) {
-        tableTypesCount += batch.numRows;
-        const typeVector = batch.getChild("table_type");
-        if (typeVector) {
-            for (let i = 0; i < batch.numRows; i++) {
-                if (typeVector.get(i) === "table") foundTableType = true;
-            }
-        }
-    }
-    t.true(tableTypesCount > 0, "Should return at least one table type");
-    t.true(foundTableType, "Should contain 'table' type");
+const test = anyTest as TestFn<TestContext>;
 
-    // 2. getTableSchema
-    const schema = await conn.getTableSchema({ catalog: undefined, dbSchema: undefined, tableName: "metadata_test" });
-    t.is(schema.fields.length, 2, "Schema should have 2 fields");
-    t.is(schema.fields[0].name, "id", "First field should be 'id'");
-    t.is(schema.fields[1].name, "name", "Second field should be 'name'"); // createTestTable uses 'name'
+test.before(async (t) => {
+  const db = await createSqliteDatabase();
+  const conn = await db.connect();
+  const stmt = await conn.createStatement();
+  
+  await createTestTable(stmt, "metadata_test");
+  
+  t.context = { db, conn, stmt };
+});
 
-    // 3. getObjects (Tables)
-    const objectsReader = await conn.getObjects({
+test.after.always(async (t) => {
+  try {
+    if (t.context.stmt) await t.context.stmt.close();
+    if (t.context.conn) await t.context.conn.close();
+    if (t.context.db) await t.context.db.close();
+  } catch (e) {
+    console.error("Error cleaning up test resources:", e);
+  }
+});
+
+test('metadata: getTableTypes', async (t) => {
+    const { conn } = t.context;
+    const tableTypes = await dumpReader(await conn.getTableTypes());
+    
+    // Sort actual results for consistent comparison with t.like
+    tableTypes.sort((a, b) => (a.table_type || '').localeCompare(b.table_type || ''));
+
+    t.like(tableTypes, [
+      { table_type: 'table' },
+      { table_type: 'view' },
+    ], "Should return expected table types sorted alphabetically");
+});
+
+test('metadata: getTableSchema', async (t) => {
+    const { conn } = t.context;
+    const schema = await conn.getTableSchema({ tableName: "metadata_test" });
+    
+    t.like(schema.fields, [
+      { name: "id", nullable: true }, // SQLite typically makes INTEGER nullable
+      { name: "name", nullable: true }, // TEXT is also nullable by default
+    ], "Schema fields should match expected structure");
+});
+
+test('metadata: getObjects', async (t) => {
+    const { conn } = t.context;
+    // SQLite structure: Catalog (null/main) -> Schemas (null/main) -> Tables
+    const objects = await dumpReader(await conn.getObjects({
         depth: 3,
         tableName: "metadata_test",
         tableType: ["table", "view"]
-    });
-    
-    let foundTable = false;
-    for await (const batch of objectsReader) {
-        if (batch.numRows > 0) foundTable = true;
-    }
-    t.true(foundTable, "Should find the table in getObjects");
+    }));
 
-    // 4. getInfo
-    const infoReader = await conn.getInfo();
-    let foundInfo = false;
-    for await (const batch of infoReader) {
-        if (batch.numRows > 0) foundInfo = true;
-    }
-    t.true(foundInfo, "Should return driver info");
-  });
+    t.like(objects, [
+      {
+        catalog_db_schemas: [
+          {
+            db_schema_tables: [
+              {
+                table_name: "metadata_test"
+              }
+            ]
+          }
+        ]
+      }
+    ], "Should find 'metadata_test' table in getObjects");
+});
+
+test('metadata: getInfo', async (t) => {
+    const { conn } = t.context;
+    const info = await dumpReader(await conn.getInfo());
+    
+    t.like(info[0], { info_name: 0, info_value: 'SQLite' }, "First driver info record should be SQLite driver name");
 });

@@ -18,6 +18,7 @@
 import * as path from 'path';
 import * as process from 'process';
 import { fileURLToPath } from 'url';
+import { RecordBatchReader } from 'apache-arrow';
 import { AdbcDatabase, AdbcConnection, AdbcStatement } from '../lib/index.js';
 
 // Resolve __dirname for ES Modules
@@ -52,23 +53,83 @@ export async function createSqliteDatabase(): Promise<AdbcDatabase> {
   });
 }
 
-export async function withSqlite(
-  callback: (db: AdbcDatabase, conn: AdbcConnection, stmt: AdbcStatement) => Promise<void>
-): Promise<void> {
-  const db = await createSqliteDatabase();
-  const conn = await db.connect();
-  const stmt = await conn.createStatement();
-  
+export async function createTestTable(stmt: AdbcStatement, tableName: string = "test_table"): Promise<void> {
   try {
-    await callback(db, conn, stmt);
-  } finally {
-    await stmt.close();
-    await conn.close();
-    await db.close();
+    await stmt.setSqlQuery(`DROP TABLE IF EXISTS ${tableName}`);
+    await stmt.executeUpdate();
+  } catch {
+    // Ignore errors
   }
+  await stmt.setSqlQuery(`CREATE TABLE ${tableName} (id INTEGER, name TEXT)`);
+  await stmt.executeUpdate();
 }
 
-export async function createTestTable(stmt: AdbcStatement, tableName: string = "test_table"): Promise<void> {
-    await stmt.setSqlQuery(`CREATE TABLE ${tableName} (id INTEGER, name TEXT)`);
-    await stmt.executeUpdate();
+export async function dumpReader(reader: RecordBatchReader): Promise<any[]> {
+
+  const rows: any[] = [];
+
+  for await (const batch of reader) {
+
+    for (const row of batch) {
+
+      rows.push(deepUnwrap(row?.toJSON()));
+
+    }
+
+  }
+
+  return rows;
+
 }
+
+
+
+function deepUnwrap(obj: any): any {
+
+  if (obj === null || obj === undefined) return obj;
+
+
+
+  if (Array.isArray(obj)) {
+
+    return obj.map(deepUnwrap);
+
+  }
+
+
+
+  // Heuristic to identify Arrow Vectors: iterable and has a 'get' method
+
+  if (typeof obj === 'object' && obj !== null && typeof obj[Symbol.iterator] === 'function' && typeof obj.get === 'function') {
+
+    return [...obj].map(deepUnwrap);
+
+  }
+
+
+
+  if (typeof obj === 'object') {
+
+    const result: any = {};
+
+    for (const key of Object.keys(obj)) {
+
+      result[key] = deepUnwrap(obj[key]);
+
+    }
+
+    return result;
+
+  }
+
+  
+
+  return obj;
+
+}
+
+
+
+
+
+

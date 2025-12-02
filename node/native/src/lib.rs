@@ -36,8 +36,23 @@ use std::sync::{Arc, Mutex};
 #[macro_use]
 extern crate napi_derive;
 
-fn to_napi_err<E: std::fmt::Display>(err: E) -> Error {
-    Error::from_reason(err.to_string())
+use adbc_client::ClientError;
+
+fn to_napi_err(err: ClientError) -> Error {
+    match err {
+        ClientError::Adbc(e) => {
+            // Format: [STATUS] Message (Vendor Code: X, SQL State: Y)
+            let sqlstate_u8: Vec<u8> = e.sqlstate.iter().map(|&c| c as u8).collect();
+            let sqlstate = std::str::from_utf8(&sqlstate_u8).unwrap_or("UNKNOWN");
+            let reason = format!(
+                "[{:?}] {} (Vendor Code: {}, SQL State: {})", 
+                e.status, e.message, e.vendor_code, sqlstate
+            );
+            Error::new(Status::GenericFailure, reason)
+        },
+        ClientError::Arrow(e) => Error::new(Status::GenericFailure, format!("Arrow Error: {}", e)),
+        ClientError::Other(e) => Error::new(Status::GenericFailure, format!("Internal Error: {}", e)),
+    }
 }
 
 fn closed_err() -> Error {
