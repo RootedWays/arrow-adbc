@@ -1,10 +1,10 @@
-import { useState } from 'react'
-import { Table as ArrowTable, tableFromIPC } from 'apache-arrow'
-import { Play, Loader2 } from 'lucide-react'
+import { useState } from "react";
+import { Table as ArrowTable, tableFromIPC } from "apache-arrow";
+import { Play, Loader2 } from "lucide-react";
 
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -12,49 +12,53 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from "@/components/ui/table";
 
 function App() {
-  const [query, setQuery] = useState('SELECT * FROM sqlite_schema')
-  const [results, setResults] = useState<ArrowTable | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState("SELECT * FROM sqlite_schema");
+  const [results, setResults] = useState<ArrowTable | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleRunQuery = async () => {
-    setLoading(true)
-    setError(null)
-    setResults(null)
+    setLoading(true);
+    setError(null);
+    setResults(null);
 
     try {
-      const response = await fetch('http://localhost:8080/query', {
-        method: 'POST',
+      const response = await fetch("http://localhost:8080/query", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({ query }),
-      })
+      });
 
       if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to execute query')
+        const data = await response.json();
+        throw new Error(data.error || "Failed to execute query");
       }
 
-      const buffer = await response.arrayBuffer()
-      const table = tableFromIPC(new Uint8Array(buffer))
-      setResults(table)
+      const buffer = await response.arrayBuffer();
+      const table = tableFromIPC(new Uint8Array(buffer));
+      setResults(table);
     } catch (err) {
-      console.error(err)
-      setError(err instanceof Error ? err.message : 'An unknown error occurred')
+      console.error(err);
+      setError(
+        err instanceof Error ? err.message : "An unknown error occurred",
+      );
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-background p-8 font-sans">
       <div className="max-w-6xl mx-auto space-y-8">
         <div className="space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight">Arrow ADBC Gateway Demo</h1>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Arrow ADBC Gateway Demo
+          </h1>
           <p className="text-muted-foreground">
             Connect to your data source and execute queries via Apache Arrow.
           </p>
@@ -134,7 +138,7 @@ function App() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

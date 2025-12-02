@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "required": ["driver"],
+  "properties": {
+    "driver": { "type": "string", "example": "{\"uri\": \":memory:\"}" },
+    "options": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "x-readme-ref-name": "CreateDatabaseRequest"
+}

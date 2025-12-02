@@ -11,9 +11,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/QueryRequest'
+              $ref: "#/components/schemas/QueryRequest"
       responses:
-        '200':
+        "200":
           description: Query executed successfully
           content:
             application/vnd.apache.arrow.stream:
@@ -22,18 +22,18 @@ paths:
             application/json:
               schema:
                 type: object # Placeholder for JSON response if any
-        '400':
+        "400":
           description: Invalid request
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
           description: Internal server error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     QueryRequest:

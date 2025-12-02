@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["id", "driver_name"],
+  "properties": {
+    "driver_name": { "type": "string" },
+    "id": { "type": "string" }
+  },
+  "x-readme-ref-name": "DatabaseInfo"
+}

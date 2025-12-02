@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "options": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "example": "{\"adbc.connection.autocommit\": \"false\"}"
+    }
+  },
+  "x-readme-ref-name": "CreateConnectionRequest"
+}

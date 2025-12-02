@@ -1,0 +1,727 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "quiver",
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/connections": {
+      "delete": {
+        "tags": ["crate"],
+        "operationId": "delete_connection",
+        "responses": {
+          "204": {
+            "description": "Connection released"
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/connections/cancel": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "cancel_connection",
+        "responses": {
+          "204": {
+            "description": "Operation cancelled"
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to cancel operation"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/connections/commit": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "commit_connection",
+        "responses": {
+          "204": {
+            "description": "Transaction committed"
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to commit transaction"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/connections/info": {
+      "get": {
+        "tags": ["crate"],
+        "operationId": "get_connection_info",
+        "responses": {
+          "200": {
+            "description": "Database metadata info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/connections/objects": {
+      "get": {
+        "tags": ["crate"],
+        "operationId": "get_connection_objects",
+        "parameters": [
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "nullable": true,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "catalog",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "db_schema",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "table_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "table_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "nullable": true
+            }
+          },
+          {
+            "name": "column_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Database objects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/connections/rollback": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "rollback_connection",
+        "responses": {
+          "204": {
+            "description": "Transaction rolled back"
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to rollback transaction"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/connections/statements": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "create_statement",
+        "responses": {
+          "200": {
+            "description": "Statement created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateStatementResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to create statement"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/connections/table-types": {
+      "get": {
+        "tags": ["crate"],
+        "operationId": "get_connection_table_types",
+        "responses": {
+          "200": {
+            "description": "Table types",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/connections/tables/{table_name}/schema": {
+      "get": {
+        "tags": ["crate"],
+        "operationId": "get_connection_table_schema",
+        "parameters": [
+          {
+            "name": "table_name",
+            "in": "path",
+            "description": "Table Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "catalog",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "db_schema",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Table schema",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/databases": {
+      "get": {
+        "tags": ["crate"],
+        "operationId": "list_databases",
+        "responses": {
+          "200": {
+            "description": "List active databases",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DatabaseInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["crate"],
+        "operationId": "create_database",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDatabaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Database created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDatabaseResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/databases/{id}": {
+      "delete": {
+        "tags": ["crate"],
+        "operationId": "delete_database",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database ID to delete",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Database deleted"
+          },
+          "404": {
+            "description": "Database not found"
+          }
+        }
+      }
+    },
+    "/databases/{id}/connections": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "create_connection",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database ID to acquire connection from",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateConnectionRequest"
+                  }
+                ],
+                "nullable": true
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "description": "Connection acquired successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateConnectionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Database not found"
+          },
+          "500": {
+            "description": "Failed to acquire connection"
+          }
+        }
+      }
+    },
+    "/drivers": {
+      "get": {
+        "tags": ["crate"],
+        "operationId": "list_drivers",
+        "responses": {
+          "200": {
+            "description": "List available drivers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["crate"],
+        "operationId": "health_check",
+        "responses": {
+          "200": {
+            "description": "Health check passed",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/statements": {
+      "delete": {
+        "tags": ["crate"],
+        "operationId": "delete_statement",
+        "responses": {
+          "204": {
+            "description": "Statement released"
+          },
+          "404": {
+            "description": "Statement not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/statements/execute": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "execute_statement_query",
+        "responses": {
+          "200": {
+            "description": "Query executed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to execute query"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/statements/execute_update": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "execute_statement_update",
+        "responses": {
+          "204": {
+            "description": "Update executed"
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to execute update"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/statements/prepare": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "prepare_statement",
+        "responses": {
+          "204": {
+            "description": "Statement prepared"
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to prepare statement"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/statements/sql": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "set_statement_sql_query",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSqlQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "SQL query set"
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to set SQL query"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Claims": {
+        "type": "object",
+        "required": ["sub", "scope", "exp"],
+        "properties": {
+          "exp": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope"
+          },
+          "sub": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateConnectionRequest": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": "{\"adbc.connection.autocommit\": \"false\"}"
+          }
+        }
+      },
+      "CreateConnectionResponse": {
+        "type": "object",
+        "required": ["token"],
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateDatabaseRequest": {
+        "type": "object",
+        "required": ["driver"],
+        "properties": {
+          "driver": {
+            "type": "string",
+            "example": "{\"uri\": \":memory:\"}"
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CreateDatabaseResponse": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateStatementResponse": {
+        "type": "object",
+        "required": ["token"],
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "DatabaseInfo": {
+        "type": "object",
+        "required": ["id", "driver_name"],
+        "properties": {
+          "driver_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "Scope": {
+        "type": "string",
+        "enum": ["Connection", "Statement"]
+      },
+      "SetSqlQueryRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearer_auth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "quiver",
+      "description": "ADBC Gateway API"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "type": "string",
+  "enum": ["Connection", "Statement"],
+  "x-readme-ref-name": "Scope"
+}
