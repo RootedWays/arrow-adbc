@@ -9,23 +9,12 @@
     "version": "0.1.0"
   },
   "paths": {
-    "/connections/{id}": {
+    "/connections": {
       "delete": {
         "tags": [
           "crate"
         ],
         "operationId": "delete_connection",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Connection ID to release",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "204": {
             "description": "Connection released"
@@ -33,26 +22,20 @@
           "404": {
             "description": "Connection not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/connections/{id}/cancel": {
+    "/connections/cancel": {
       "post": {
         "tags": [
           "crate"
         ],
         "operationId": "cancel_connection",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Connection ID to cancel current operation",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "204": {
             "description": "Operation cancelled"
@@ -63,26 +46,20 @@
           "500": {
             "description": "Failed to cancel operation"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/connections/{id}/commit": {
+    "/connections/commit": {
       "post": {
         "tags": [
           "crate"
         ],
         "operationId": "commit_connection",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Connection ID to commit transaction",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "204": {
             "description": "Transaction committed"
@@ -93,34 +70,28 @@
           "500": {
             "description": "Failed to commit transaction"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/connections/{id}/info": {
+    "/connections/info": {
       "get": {
         "tags": [
           "crate"
         ],
         "operationId": "get_connection_info",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Connection ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Database metadata info",
             "content": {
-              "application/json": {
+              "application/vnd.apache.arrow.stream": {
                 "schema": {
-                  "type": "array",
-                  "items": {}
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -128,25 +99,21 @@
           "404": {
             "description": "Connection not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/connections/{id}/objects": {
+    "/connections/objects": {
       "get": {
         "tags": [
           "crate"
         ],
         "operationId": "get_connection_objects",
         "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Connection ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "depth",
             "in": "query",
@@ -211,10 +178,10 @@
           "200": {
             "description": "Database objects",
             "content": {
-              "application/json": {
+              "application/vnd.apache.arrow.stream": {
                 "schema": {
-                  "type": "array",
-                  "items": {}
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -222,26 +189,20 @@
           "404": {
             "description": "Connection not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/connections/{id}/rollback": {
+    "/connections/rollback": {
       "post": {
         "tags": [
           "crate"
         ],
         "operationId": "rollback_connection",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Connection ID to rollback transaction",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "204": {
             "description": "Transaction rolled back"
@@ -252,26 +213,20 @@
           "500": {
             "description": "Failed to rollback transaction"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/connections/{id}/statements": {
+    "/connections/statements": {
       "post": {
         "tags": [
           "crate"
         ],
         "operationId": "create_statement",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Connection ID to create statement from",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Statement created",
@@ -289,34 +244,28 @@
           "500": {
             "description": "Failed to create statement"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/connections/{id}/table-types": {
+    "/connections/table-types": {
       "get": {
         "tags": [
           "crate"
         ],
         "operationId": "get_connection_table_types",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Connection ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Table types",
             "content": {
-              "application/json": {
+              "application/vnd.apache.arrow.stream": {
                 "schema": {
-                  "type": "array",
-                  "items": {}
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -324,25 +273,21 @@
           "404": {
             "description": "Connection not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/connections/{id}/tables/{table_name}/schema": {
+    "/connections/tables/{table_name}/schema": {
       "get": {
         "tags": [
           "crate"
         ],
         "operationId": "get_connection_table_schema",
         "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Connection ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "table_name",
             "in": "path",
@@ -383,7 +328,12 @@
           "404": {
             "description": "Connection not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
     "/databases": {
@@ -565,23 +515,12 @@
         }
       }
     },
-    "/statements/{id}": {
+    "/statements": {
       "delete": {
         "tags": [
           "crate"
         ],
         "operationId": "delete_statement",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Statement ID to release",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "204": {
             "description": "Statement released"
@@ -589,34 +528,28 @@
           "404": {
             "description": "Statement not found"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/statements/{id}/execute": {
+    "/statements/execute": {
       "post": {
         "tags": [
           "crate"
         ],
         "operationId": "execute_statement_query",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Statement ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Query executed",
             "content": {
-              "application/json": {
+              "application/vnd.apache.arrow.stream": {
                 "schema": {
-                  "type": "array",
-                  "items": {}
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -627,26 +560,20 @@
           "500": {
             "description": "Failed to execute query"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/statements/{id}/execute_update": {
+    "/statements/execute_update": {
       "post": {
         "tags": [
           "crate"
         ],
         "operationId": "execute_statement_update",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Statement ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "204": {
             "description": "Update executed"
@@ -657,26 +584,20 @@
           "500": {
             "description": "Failed to execute update"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/statements/{id}/prepare": {
+    "/statements/prepare": {
       "post": {
         "tags": [
           "crate"
         ],
         "operationId": "prepare_statement",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Statement ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "204": {
             "description": "Statement prepared"
@@ -687,26 +608,20 @@
           "500": {
             "description": "Failed to prepare statement"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
-    "/statements/{id}/sql": {
+    "/statements/sql": {
       "post": {
         "tags": [
           "crate"
         ],
         "operationId": "set_statement_sql_query",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Statement ID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -727,12 +642,37 @@
           "500": {
             "description": "Failed to set SQL query"
           }
-        }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     }
   },
   "components": {
     "schemas": {
+      "Claims": {
+        "type": "object",
+        "required": [
+          "sub",
+          "scope",
+          "exp"
+        ],
+        "properties": {
+          "exp": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope"
+          },
+          "sub": {
+            "type": "string"
+          }
+        }
+      },
       "CreateConnectionRequest": {
         "type": "object",
         "properties": {
@@ -748,10 +688,10 @@
       "CreateConnectionResponse": {
         "type": "object",
         "required": [
-          "id"
+          "token"
         ],
         "properties": {
-          "id": {
+          "token": {
             "type": "string"
           }
         }
@@ -788,10 +728,10 @@
       "CreateStatementResponse": {
         "type": "object",
         "required": [
-          "id"
+          "token"
         ],
         "properties": {
-          "id": {
+          "token": {
             "type": "string"
           }
         }
@@ -811,6 +751,24 @@
           }
         }
       },
+      "QueryRequest": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "Scope": {
+        "type": "string",
+        "enum": [
+          "Connection",
+          "Statement"
+        ]
+      },
       "SetSqlQueryRequest": {
         "type": "object",
         "required": [
@@ -821,6 +779,13 @@
             "type": "string"
           }
         }
+      }
+    },
+    "securitySchemes": {
+      "bearer_auth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
       }
     }
   },

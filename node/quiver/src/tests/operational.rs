@@ -1,6 +1,9 @@
-use axum::{body::Body, http::{Request, StatusCode}};
-use tower::util::ServiceExt;
 use super::helpers::app;
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
+use tower::util::ServiceExt;
 
 #[tokio::test]
 async fn test_operational_endpoints() {

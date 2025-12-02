@@ -1,7 +1,13 @@
-use axum::{body::Body, http::{Request, StatusCode}};
+use super::helpers::{
+    app, create_test_conn, create_test_db, create_test_stmt, delete_connection, delete_database,
+    delete_statement,
+};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
 use serde_json::Value;
 use tower::util::ServiceExt;
-use super::helpers::{app, create_test_db, create_test_conn, create_test_stmt, delete_resource};
 
 #[tokio::test]
 async fn test_full_lifecycle_sqlite() {
@@ -27,11 +33,11 @@ async fn test_full_lifecycle_sqlite() {
     let dbs: Vec<Value> = serde_json::from_slice(&body).unwrap();
     assert!(dbs.iter().any(|db| db["id"] == db_id));
 
-    let conn_id = create_test_conn(&app, &db_id).await;
-    println!("Created Connection ID: {}", conn_id);
+    let conn_token = create_test_conn(&app, &db_id).await;
+    println!("Created Connection Token");
 
-    delete_resource(&app, &format!("/connections/{}", conn_id)).await;
-    delete_resource(&app, &format!("/databases/{}", db_id)).await;
+    delete_connection(&app, &conn_token).await;
+    delete_database(&app, &db_id).await;
 }
 
 #[tokio::test]
@@ -39,14 +45,14 @@ async fn test_connection_pooling_limits() {
     let app = app().await;
     let db_id = create_test_db(&app).await;
 
-    let mut conn_ids = Vec::new();
+    let mut conn_tokens = Vec::new();
     for _ in 0..5 {
-        conn_ids.push(create_test_conn(&app, &db_id).await);
+        conn_tokens.push(create_test_conn(&app, &db_id).await);
     }
-    println!("Acquired {} connections", conn_ids.len());
+    println!("Acquired {} connections", conn_tokens.len());
 
-    for id in conn_ids {
-        delete_resource(&app, &format!("/connections/{}", id)).await;
+    for token in conn_tokens {
+        delete_connection(&app, &token).await;
     }
 }
 
@@ -94,7 +100,7 @@ async fn test_connection_actions() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let conn_id = serde_json::from_slice::<Value>(&body).unwrap()["id"]
+    let conn_token = serde_json::from_slice::<Value>(&body).unwrap()["token"]
         .as_str()
         .unwrap()
         .to_string();
@@ -105,7 +111,8 @@ async fn test_connection_actions() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/connections/{}/commit", conn_id))
+                .uri("/connections/commit")
+                .header("Authorization", format!("Bearer {}", conn_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -119,7 +126,8 @@ async fn test_connection_actions() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/connections/{}/rollback", conn_id))
+                .uri("/connections/rollback")
+                .header("Authorization", format!("Bearer {}", conn_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -133,7 +141,8 @@ async fn test_connection_actions() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/connections/{}/cancel", conn_id))
+                .uri("/connections/cancel")
+                .header("Authorization", format!("Bearer {}", conn_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -144,16 +153,16 @@ async fn test_connection_actions() {
             || response.status() == StatusCode::NOT_IMPLEMENTED
     );
 
-    delete_resource(&app, &format!("/connections/{}", conn_id)).await;
-    delete_resource(&app, &format!("/databases/{}", db_id)).await;
+    delete_connection(&app, &conn_token).await;
+    delete_database(&app, &db_id).await;
 }
 
 #[tokio::test]
 async fn test_statement_lifecycle() {
     let app = app().await;
     let db_id = create_test_db(&app).await;
-    let conn_id = create_test_conn(&app, &db_id).await;
-    let stmt_id = create_test_stmt(&app, &conn_id).await;
+    let conn_token = create_test_conn(&app, &db_id).await;
+    let stmt_token = create_test_stmt(&app, &conn_token).await;
 
     // Set SQL
     let response = app
@@ -161,7 +170,8 @@ async fn test_statement_lifecycle() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/statements/{}/sql", stmt_id))
+                .uri("/statements/sql")
+                .header("Authorization", format!("Bearer {}", stmt_token))
                 .header("Content-Type", "application/json")
                 .body(Body::from(
                     r#"{ "query": "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)" }"#,
@@ -178,7 +188,8 @@ async fn test_statement_lifecycle() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/statements/{}/prepare", stmt_id))
+                .uri("/statements/prepare")
+                .header("Authorization", format!("Bearer {}", stmt_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -192,7 +203,8 @@ async fn test_statement_lifecycle() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(&format!("/statements/{}/execute_update", stmt_id))
+                .uri("/statements/execute_update")
+                .header("Authorization", format!("Bearer {}", stmt_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -200,9 +212,9 @@ async fn test_statement_lifecycle() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    delete_resource(&app, &format!("/statements/{}", stmt_id)).await;
-    delete_resource(&app, &format!("/connections/{}", conn_id)).await;
-    delete_resource(&app, &format!("/databases/{}", db_id)).await;
+    delete_statement(&app, &stmt_token).await;
+    delete_connection(&app, &conn_token).await;
+    delete_database(&app, &db_id).await;
 }
 
 #[tokio::test]
@@ -249,29 +261,31 @@ async fn test_error_handling() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
+    // Test missing auth for connection delete
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
-                .uri("/connections/non-existent-id")
+                .uri("/connections")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST); // Missing Credentials
 
+    // Test missing auth for statement creation
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/connections/non-existent-id/statements")
+                .uri("/connections/statements")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST); // Missing Credentials
 }

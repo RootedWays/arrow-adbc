@@ -3,11 +3,7 @@ use adbc_core::{
     Connection, Driver, Optionable, Statement,
 };
 use adbc_driver_manager::{ManagedConnection, ManagedStatement};
-use arrow::array::{
-    Array, BooleanArray, Int32Array, Int64Array, StringArray, UInt32Array, UnionArray,
-};
-use arrow_json::writer::LineDelimited;
-use arrow_json::WriterBuilder;
+use arrow::array::RecordBatchReader;
 use axum::{
     extract::{Path, Query},
     http::StatusCode,
@@ -22,15 +18,18 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+mod auth;
 mod connection_manager;
 mod database_manager;
 mod driver_manager;
 mod statement_manager;
 
+use crate::auth::{sign_token, ConnectionClaims, Scope, StatementClaims};
 use crate::connection_manager::ConnectionRegistry;
 use crate::database_manager::DatabaseRegistry;
 use crate::driver_manager::DriverRegistry;
 use crate::statement_manager::StatementRegistry;
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 
 #[cfg(test)]
 mod tests;
@@ -90,17 +89,121 @@ struct CreateConnectionRequest {
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
 struct CreateConnectionResponse {
-    id: String,
+    token: String,
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
 struct CreateStatementResponse {
-    id: String,
+    token: String,
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 struct SetSqlQueryRequest {
     query: String,
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct QueryRequest {
+    query: String,
+}
+
+// A bridge to write to a Tokio channel from a synchronous Writer
+struct ChannelWriter {
+    sender: tokio::sync::mpsc::Sender<Result<axum::body::Bytes, std::io::Error>>,
+}
+
+impl std::io::Write for ChannelWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let bytes = axum::body::Bytes::copy_from_slice(buf);
+        // We use blocking_send here because this is run inside spawn_blocking
+        match self.sender.blocking_send(Ok(bytes)) {
+            Ok(_) => Ok(buf.len()),
+            Err(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "Channel closed",
+            )),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/connections/query",
+    security(
+        ("bearer_auth" = [])
+    ),
+    request_body = QueryRequest,
+    responses((
+        status = 200,
+        description = "Arrow IPC Stream",
+        content_type = "application/vnd.apache.arrow.stream",
+        body = Vec<u8>
+    ), (status = 404, description = "Connection not found"), (status = 500, description = "Failed to execute query"))
+)]
+async fn query_connection_ipc(
+    Extension(state): Extension<Arc<AppState>>,
+    claims: ConnectionClaims,
+    Json(payload): Json<QueryRequest>,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let conn_id = claims.0.sub;
+    let conn_entry = state.connection_registry.get(&conn_id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Connection '{}' not found", conn_id),
+    ))?;
+
+    // Clone the Arc to the entry so we can move it into the blocking task
+    let entry_arc = conn_entry.clone();
+    let query = payload.query.clone();
+
+    // Create a channel for streaming bytes
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(2);
+
+    // Spawn blocking task to handle the entire Statement lifecycle (Create -> Execute -> Stream -> Drop)
+    tokio::task::spawn_blocking(move || {
+        // We use blocking_lock because we are in a blocking task.
+        // Ensure the connection isn't held too long, but we need it for the statement creation.
+        let mut conn_guard = entry_arc.connection.blocking_lock();
+        let managed_conn = &mut ***conn_guard;
+
+        let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let mut statement = managed_conn.new_statement()?;
+            statement.set_sql_query(&query)?;
+            let reader = statement.execute()?;
+
+            let mut channel_writer = ChannelWriter { sender: tx.clone() };
+            let schema = reader.schema();
+            let mut writer =
+                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+
+            for batch in reader {
+                let b = batch?;
+                writer.write(&b)?;
+            }
+            writer.finish()?;
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            tracing::error!("Streaming error: {}", e);
+            // Try to send error down channel if possible, or just close it
+            let _ = tx.blocking_send(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )));
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let body = axum::body::Body::from_stream(stream);
+
+    Ok(axum::response::Response::builder()
+        .header("Content-Type", "application/vnd.apache.arrow.stream")
+        .body(body)
+        .unwrap())
 }
 
 #[derive(OpenApi)]
@@ -134,14 +237,35 @@ struct SetSqlQueryRequest {
         CreateConnectionResponse,
         CreateStatementResponse,
         SetSqlQueryRequest,
-        crate::database_manager::DatabaseInfo
+        QueryRequest,
+        crate::database_manager::DatabaseInfo,
+        crate::auth::Claims,
+        crate::auth::Scope
     )),
+    modifiers(&SecurityAddon),
     tags((
         name = "quiver",
         description = "ADBC Gateway API"
     ))
 )]
 pub(crate) struct ApiDoc;
+
+struct SecurityAddon;
+
+impl utoipa::Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        let components = openapi.components.as_mut().unwrap();
+        components.add_security_scheme(
+            "bearer_auth",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .build(),
+            ),
+        );
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -193,29 +317,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/databases", get(list_databases).post(create_database))
         .route("/databases/:id", delete(delete_database))
         .route("/databases/:id/connections", post(create_connection))
-        .route("/connections/:id", delete(delete_connection))
-        .route("/connections/:id/commit", post(commit_connection))
-        .route("/connections/:id/rollback", post(rollback_connection))
-        .route("/connections/:id/cancel", post(cancel_connection))
-        .route("/connections/:id/info", get(get_connection_info))
-        .route("/connections/:id/objects", get(get_connection_objects))
+        .route("/connections", delete(delete_connection))
+        .route("/connections/commit", post(commit_connection))
+        .route("/connections/rollback", post(rollback_connection))
+        .route("/connections/cancel", post(cancel_connection))
+        .route("/connections/query", post(query_connection_ipc))
+        .route("/connections/info", get(get_connection_info))
+        .route("/connections/objects", get(get_connection_objects))
+        .route("/connections/table-types", get(get_connection_table_types))
         .route(
-            "/connections/:id/table-types",
-            get(get_connection_table_types),
-        )
-        .route(
-            "/connections/:id/tables/:table_name/schema",
+            "/connections/tables/:table_name/schema",
             get(get_connection_table_schema),
         )
-        .route("/connections/:id/statements", post(create_statement))
-        .route("/statements/:id", delete(delete_statement))
-        .route("/statements/:id/sql", post(set_statement_sql_query))
-        .route("/statements/:id/prepare", post(prepare_statement))
-        .route("/statements/:id/execute", post(execute_statement_query))
-        .route(
-            "/statements/:id/execute_update",
-            post(execute_statement_update),
-        )
+        .route("/connections/statements", post(create_statement))
+        .route("/statements", delete(delete_statement))
+        .route("/statements/sql", post(set_statement_sql_query))
+        .route("/statements/prepare", post(prepare_statement))
+        .route("/statements/execute", post(execute_statement_query))
+        .route("/statements/execute_update", post(execute_statement_update))
         .layer(Extension(state));
 
     // Run it
@@ -412,23 +531,29 @@ async fn create_connection(
     // 4. Register the connection (session)
     let conn_id = state.connection_registry.register(connection).await;
 
+    // 5. Generate Token
+    let token = sign_token(conn_id.clone(), Scope::Connection).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to generate connection token".to_string(),
+        )
+    })?;
+
     tracing::info!(
         "Acquired connection '{}' from database '{}'",
         conn_id,
         db_id
     );
 
-    Ok(Json(CreateConnectionResponse { id: conn_id }))
+    Ok(Json(CreateConnectionResponse { token }))
 }
 
 #[utoipa::path(
     delete,
-    path = "/connections/{id}",
-    params((
-        "id" = String,
-        Path,
-        description = "Connection ID to release"
-    )),
+    path = "/connections",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 204,
         description = "Connection released"
@@ -436,8 +561,9 @@ async fn create_connection(
 )]
 async fn delete_connection(
     Extension(state): Extension<Arc<AppState>>,
-    Path(id): Path<String>,
+    claims: ConnectionClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let id = claims.0.sub;
     if state.connection_registry.remove(&id).await.is_some() {
         tracing::info!("Released connection '{}'", id);
         Ok(StatusCode::NO_CONTENT)
@@ -451,11 +577,10 @@ async fn delete_connection(
 
 async fn handle_connection_action(
     state: Extension<Arc<AppState>>,
-    id: Path<String>,
+    conn_id: String,
     action: impl FnOnce(&mut ManagedConnection) -> Result<(), adbc_core::error::Error>,
     action_name: &str,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let conn_id = id.0;
     let conn_entry = state.connection_registry.get(&conn_id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", conn_id),
@@ -490,12 +615,10 @@ async fn handle_connection_action(
 
 #[utoipa::path(
     post,
-    path = "/connections/{id}/commit",
-    params((
-        "id" = String,
-        Path,
-        description = "Connection ID to commit transaction"
-    )),
+    path = "/connections/commit",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 204,
         description = "Transaction committed"
@@ -503,19 +626,23 @@ async fn handle_connection_action(
 )]
 async fn commit_connection(
     state: Extension<Arc<AppState>>,
-    id: Path<String>,
+    claims: ConnectionClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    handle_connection_action(state, id, |conn| conn.commit(), "commit transaction").await
+    handle_connection_action(
+        state,
+        claims.0.sub,
+        |conn| conn.commit(),
+        "commit transaction",
+    )
+    .await
 }
 
 #[utoipa::path(
     post,
-    path = "/connections/{id}/rollback",
-    params((
-        "id" = String,
-        Path,
-        description = "Connection ID to rollback transaction"
-    )),
+    path = "/connections/rollback",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 204,
         description = "Transaction rolled back"
@@ -523,19 +650,23 @@ async fn commit_connection(
 )]
 async fn rollback_connection(
     state: Extension<Arc<AppState>>,
-    id: Path<String>,
+    claims: ConnectionClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    handle_connection_action(state, id, |conn| conn.rollback(), "rollback transaction").await
+    handle_connection_action(
+        state,
+        claims.0.sub,
+        |conn| conn.rollback(),
+        "rollback transaction",
+    )
+    .await
 }
 
 #[utoipa::path(
     post,
-    path = "/connections/{id}/cancel",
-    params((
-        "id" = String,
-        Path,
-        description = "Connection ID to cancel current operation"
-    )),
+    path = "/connections/cancel",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 204,
         description = "Operation cancelled"
@@ -543,18 +674,22 @@ async fn rollback_connection(
 )]
 async fn cancel_connection(
     state: Extension<Arc<AppState>>,
-    id: Path<String>,
+    claims: ConnectionClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    handle_connection_action(state, id, |conn| conn.cancel(), "cancel operation").await
+    handle_connection_action(
+        state,
+        claims.0.sub,
+        |conn| conn.cancel(),
+        "cancel operation",
+    )
+    .await
 }
 #[utoipa::path(
     post,
-    path = "/connections/{id}/statements",
-    params((
-        "id" = String,
-        Path,
-        description = "Connection ID to create statement from"
-    )),
+    path = "/connections/statements",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 200,
         description = "Statement created",
@@ -563,8 +698,9 @@ async fn cancel_connection(
 )]
 async fn create_statement(
     Extension(state): Extension<Arc<AppState>>,
-    Path(conn_id): Path<String>,
+    claims: ConnectionClaims,
 ) -> Result<Json<CreateStatementResponse>, (StatusCode, String)> {
+    let conn_id = claims.0.sub;
     let conn_entry = state.connection_registry.get(&conn_id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", conn_id),
@@ -581,23 +717,27 @@ async fn create_statement(
     })?;
 
     let stmt_id = state.statement_registry.register(statement).await;
+    let token = sign_token(stmt_id.clone(), Scope::Statement).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to generate statement token".to_string(),
+        )
+    })?;
 
     tracing::info!(
         "Created statement '{}' from connection '{}'",
         stmt_id,
         conn_id
     );
-    Ok(Json(CreateStatementResponse { id: stmt_id }))
+    Ok(Json(CreateStatementResponse { token }))
 }
 
 #[utoipa::path(
     delete,
-    path = "/statements/{id}",
-    params((
-        "id" = String,
-        Path,
-        description = "Statement ID to release"
-    )),
+    path = "/statements",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 204,
         description = "Statement released"
@@ -605,8 +745,9 @@ async fn create_statement(
 )]
 async fn delete_statement(
     Extension(state): Extension<Arc<AppState>>,
-    Path(id): Path<String>,
+    claims: StatementClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let id = claims.0.sub;
     if state.statement_registry.remove(&id).await.is_some() {
         tracing::info!("Released statement '{}'", id);
         Ok(StatusCode::NO_CONTENT)
@@ -620,11 +761,10 @@ async fn delete_statement(
 
 async fn handle_statement_action(
     state: Extension<Arc<AppState>>,
-    id: Path<String>,
+    stmt_id: String,
     action: impl FnOnce(&mut ManagedStatement) -> Result<(), adbc_core::error::Error>,
     action_name: &str,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let stmt_id = id.0;
     let stmt_entry = state.statement_registry.get(&stmt_id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Statement '{}' not found", stmt_id),
@@ -658,12 +798,10 @@ async fn handle_statement_action(
 
 #[utoipa::path(
     post,
-    path = "/statements/{id}/sql",
-    params((
-        "id" = String,
-        Path,
-        description = "Statement ID"
-    )),
+    path = "/statements/sql",
+    security(
+        ("bearer_auth" = [])
+    ),
     request_body = SetSqlQueryRequest,
     responses((
         status = 204,
@@ -672,12 +810,12 @@ async fn handle_statement_action(
 )]
 async fn set_statement_sql_query(
     state: Extension<Arc<AppState>>,
-    id: Path<String>,
+    claims: StatementClaims,
     Json(payload): Json<SetSqlQueryRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_statement_action(
         state,
-        id,
+        claims.0.sub,
         move |stmt| stmt.set_sql_query(&payload.query),
         "set SQL query",
     )
@@ -686,12 +824,10 @@ async fn set_statement_sql_query(
 
 #[utoipa::path(
     post,
-    path = "/statements/{id}/prepare",
-    params((
-        "id" = String,
-        Path,
-        description = "Statement ID"
-    )),
+    path = "/statements/prepare",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 204,
         description = "Statement prepared"
@@ -699,19 +835,23 @@ async fn set_statement_sql_query(
 )]
 async fn prepare_statement(
     state: Extension<Arc<AppState>>,
-    id: Path<String>,
+    claims: StatementClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    handle_statement_action(state, id, |stmt| stmt.prepare(), "prepare statement").await
+    handle_statement_action(
+        state,
+        claims.0.sub,
+        |stmt| stmt.prepare(),
+        "prepare statement",
+    )
+    .await
 }
 
 #[utoipa::path(
     post,
-    path = "/statements/{id}/execute_update",
-    params((
-        "id" = String,
-        Path,
-        description = "Statement ID"
-    )),
+    path = "/statements/execute_update",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 204,
         description = "Update executed"
@@ -719,11 +859,11 @@ async fn prepare_statement(
 )]
 async fn execute_statement_update(
     state: Extension<Arc<AppState>>,
-    id: Path<String>,
+    claims: StatementClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_statement_action(
         state,
-        id,
+        claims.0.sub,
         |stmt| stmt.execute_update().map(|_| ()),
         "execute update",
     )
@@ -732,318 +872,301 @@ async fn execute_statement_update(
 
 #[utoipa::path(
     post,
-    path = "/statements/{id}/execute",
-    params((
-        "id" = String,
-        Path,
-        description = "Statement ID"
-    )),
+    path = "/statements/execute",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 200,
         description = "Query executed",
-        body = Vec<Value>
+        content_type = "application/vnd.apache.arrow.stream",
+        body = Vec<u8>
     ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to execute query"))
 )]
 async fn execute_statement_query(
     Extension(state): Extension<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
-    let stmt_id = id;
+    claims: StatementClaims,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let stmt_id = claims.0.sub;
     let stmt_entry = state.statement_registry.get(&stmt_id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Statement '{}' not found", stmt_id),
     ))?;
 
-    let mut stmt_guard = stmt_entry.statement.lock().await;
+    // Clone entry to move into blocking task
+    let entry_arc = stmt_entry.clone();
 
-    let reader = stmt_guard.execute().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to execute query: {}", e),
-        )
-    })?;
+    // Create a channel for streaming bytes
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(2);
 
-    serialize_reader(reader)
-}
+    // Spawn blocking task
+    tokio::task::spawn_blocking(move || {
+        let mut stmt_guard = entry_arc.statement.blocking_lock();
+        // In adbc_driver_manager, ManagedStatement wraps the ADBC statement.
 
-fn serialize_reader<R: arrow::array::RecordBatchReader>(
-    reader: R,
-) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
-    let mut rows = Vec::new();
-    for batch in reader {
-        let batch = batch.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Arrow error: {}", e),
-            )
-        })?;
-        let mut buf = Vec::new();
-        let mut writer = WriterBuilder::new().build::<_, LineDelimited>(&mut buf);
-        writer.write(&batch).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("JSON write error: {}", e),
-            )
-        })?;
-        writer.finish().map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("JSON finish error: {}", e),
-            )
-        })?;
+        let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let reader = stmt_guard.execute()?;
 
-        let json_str = String::from_utf8(buf).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("UTF8 error: {}", e),
-            )
-        })?;
-        for line in json_str.lines() {
-            if !line.is_empty() {
-                let val: serde_json::Value = serde_json::from_str(line).map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("JSON parse error: {}", e),
-                    )
-                })?;
-                rows.push(val);
+            let mut channel_writer = ChannelWriter { sender: tx.clone() };
+            let schema = reader.schema();
+            let mut writer =
+                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+
+            for batch in reader {
+                let b = batch?;
+                writer.write(&b)?;
             }
+            writer.finish()?;
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            tracing::error!("Streaming error: {}", e);
+            let _ = tx.blocking_send(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )));
         }
-    }
-    Ok(Json(rows))
-}
+    });
 
-fn serialize_info_reader<R: arrow::array::RecordBatchReader>(
-    reader: R,
-) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
-    let mut rows = Vec::new();
-    for batch in reader {
-        let batch = batch.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Arrow error: {}", e),
-            )
-        })?;
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let body = axum::body::Body::from_stream(stream);
 
-        let info_codes = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .ok_or((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Expected UInt32 for info_code".to_string(),
-            ))?;
-        let info_values = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<UnionArray>()
-            .ok_or((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Expected Union for info_value".to_string(),
-            ))?;
-
-        for i in 0..batch.num_rows() {
-            let code = info_codes.value(i);
-            let type_id = info_values.type_id(i);
-            let value_offset = info_values.value_offset(i);
-            let child = info_values.child(type_id);
-
-            // ADBC info_value children (mapped by convention/spec, though dynamic lookup is safer this is a quick fix):
-            // 0: string_value (Utf8)
-            // 1: bool_value (Boolean)
-            // 2: int64_value (Int64)
-            // 3: int32_bitmask (Int32)
-            // 4: string_list (List<Utf8>) - Not handled
-            // 5: int32_to_int32_list_map (Map) - Not handled
-
-            let val = match type_id {
-                0 => {
-                    // String
-                    let arr = child.as_any().downcast_ref::<StringArray>().unwrap();
-                    if arr.is_null(value_offset) {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::Value::String(arr.value(value_offset).to_string())
-                    }
-                }
-                1 => {
-                    // Bool
-                    let arr = child.as_any().downcast_ref::<BooleanArray>().unwrap();
-                    if arr.is_null(value_offset) {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::Value::Bool(arr.value(value_offset))
-                    }
-                }
-                2 => {
-                    // Int64
-                    let arr = child.as_any().downcast_ref::<Int64Array>().unwrap();
-                    if arr.is_null(value_offset) {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(arr.value(value_offset))
-                    }
-                }
-                3 => {
-                    // Int32
-                    let arr = child.as_any().downcast_ref::<Int32Array>().unwrap();
-                    if arr.is_null(value_offset) {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(arr.value(value_offset))
-                    }
-                }
-                _ => serde_json::Value::String(format!("Unsupported Union Variant {}", type_id)),
-            };
-
-            rows.push(serde_json::json!({
-                "info_name": code,
-                "info_value": val
-            }));
-        }
-    }
-    Ok(Json(rows))
+    Ok(axum::response::Response::builder()
+        .header("Content-Type", "application/vnd.apache.arrow.stream")
+        .body(body)
+        .unwrap())
 }
 
 #[utoipa::path(
     get,
-    path = "/connections/{id}/info",
-    params((
-        "id" = String,
-        Path,
-        description = "Connection ID"
-    )),
+    path = "/connections/info",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 200,
         description = "Database metadata info",
-        body = Vec<Value>
+        content_type = "application/vnd.apache.arrow.stream",
+        body = Vec<u8>
     ), (status = 404, description = "Connection not found"))
 )]
 async fn get_connection_info(
     Extension(state): Extension<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    claims: ConnectionClaims,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let id = claims.0.sub;
     let conn_entry = state.connection_registry.get(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", id),
     ))?;
 
-    let mut conn_guard = conn_entry.connection.lock().await;
-    let managed_conn = &mut ***conn_guard;
+    let entry_arc = conn_entry.clone();
 
-    // Get all info codes
-    let reader = managed_conn.get_info(None).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to get info: {}", e),
-        )
-    })?;
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(2);
 
-    serialize_info_reader(reader)
+    tokio::task::spawn_blocking(move || {
+        let mut conn_guard = entry_arc.connection.blocking_lock();
+        let managed_conn = &mut ***conn_guard;
+
+        let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let reader = managed_conn.get_info(None)?;
+
+            let mut channel_writer = ChannelWriter { sender: tx.clone() };
+            let schema = reader.schema();
+            let mut writer =
+                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+
+            for batch in reader {
+                let b = batch?;
+                writer.write(&b)?;
+            }
+            writer.finish()?;
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            tracing::error!("Streaming error: {}", e);
+            let _ = tx.blocking_send(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )));
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let body = axum::body::Body::from_stream(stream);
+
+    Ok(axum::response::Response::builder()
+        .header("Content-Type", "application/vnd.apache.arrow.stream")
+        .body(body)
+        .unwrap())
 }
 
 #[utoipa::path(
     get,
-    path = "/connections/{id}/objects",
+    path = "/connections/objects",
+    security(
+        ("bearer_auth" = [])
+    ),
     params(
-        ("id" = String, Path, description = "Connection ID"),
         GetObjectsParams
     ),
     responses((
         status = 200,
         description = "Database objects",
-        body = Vec<Value>
+        content_type = "application/vnd.apache.arrow.stream",
+        body = Vec<u8>
     ), (status = 404, description = "Connection not found"))
 )]
 async fn get_connection_objects(
     Extension(state): Extension<Arc<AppState>>,
-    Path(id): Path<String>,
+    claims: ConnectionClaims,
     Query(params): Query<GetObjectsParams>,
-) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let id = claims.0.sub;
     let conn_entry = state.connection_registry.get(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", id),
     ))?;
 
-    let mut conn_guard = conn_entry.connection.lock().await;
-    let managed_conn = &mut ***conn_guard;
+    let entry_arc = conn_entry.clone();
 
-    let depth = match params.depth.unwrap_or(0) {
-        0 => ObjectDepth::All,
-        1 => ObjectDepth::Catalogs,
-        2 => ObjectDepth::Schemas,
-        3 => ObjectDepth::Tables,
-        4 => ObjectDepth::Columns,
-        _ => ObjectDepth::All,
-    };
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(2);
 
-    let table_types = params
-        .table_type
-        .map(|v| v.into_iter().collect::<Vec<String>>());
-    let table_types_slices: Option<Vec<&str>> = table_types
-        .as_ref()
-        .map(|v| v.iter().map(|s| s.as_str()).collect());
+    tokio::task::spawn_blocking(move || {
+        let mut conn_guard = entry_arc.connection.blocking_lock();
+        let managed_conn = &mut ***conn_guard;
 
-    let reader = managed_conn
-        .get_objects(
-            depth,
-            params.catalog.as_deref(),
-            params.db_schema.as_deref(),
-            params.table_name.as_deref(),
-            table_types_slices,
-            params.column_name.as_deref(),
-        )
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get objects: {}", e),
-            )
-        })?;
+        let depth = match params.depth.unwrap_or(0) {
+            0 => ObjectDepth::All,
+            1 => ObjectDepth::Catalogs,
+            2 => ObjectDepth::Schemas,
+            3 => ObjectDepth::Tables,
+            4 => ObjectDepth::Columns,
+            _ => ObjectDepth::All,
+        };
 
-    serialize_reader(reader)
+        let table_types = params
+            .table_type
+            .map(|v| v.into_iter().collect::<Vec<String>>());
+        let table_types_slices: Option<Vec<&str>> = table_types
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect());
+
+        let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let reader = managed_conn.get_objects(
+                depth,
+                params.catalog.as_deref(),
+                params.db_schema.as_deref(),
+                params.table_name.as_deref(),
+                table_types_slices,
+                params.column_name.as_deref(),
+            )?;
+
+            let mut channel_writer = ChannelWriter { sender: tx.clone() };
+            let schema = reader.schema();
+            let mut writer =
+                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+
+            for batch in reader {
+                let b = batch?;
+                writer.write(&b)?;
+            }
+            writer.finish()?;
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            tracing::error!("Streaming error: {}", e);
+            let _ = tx.blocking_send(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )));
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let body = axum::body::Body::from_stream(stream);
+
+    Ok(axum::response::Response::builder()
+        .header("Content-Type", "application/vnd.apache.arrow.stream")
+        .body(body)
+        .unwrap())
 }
 
 #[utoipa::path(
     get,
-    path = "/connections/{id}/table-types",
-    params((
-        "id" = String,
-        Path,
-        description = "Connection ID"
-    )),
+    path = "/connections/table-types",
+    security(
+        ("bearer_auth" = [])
+    ),
     responses((
         status = 200,
         description = "Table types",
-        body = Vec<Value>
+        content_type = "application/vnd.apache.arrow.stream",
+        body = Vec<u8>
     ), (status = 404, description = "Connection not found"))
 )]
 async fn get_connection_table_types(
     Extension(state): Extension<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    claims: ConnectionClaims,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let id = claims.0.sub;
     let conn_entry = state.connection_registry.get(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", id),
     ))?;
 
-    let mut conn_guard = conn_entry.connection.lock().await;
-    let managed_conn = &mut ***conn_guard;
+    let entry_arc = conn_entry.clone();
 
-    let reader = managed_conn.get_table_types().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to get table types: {}", e),
-        )
-    })?;
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(2);
 
-    serialize_reader(reader)
+    tokio::task::spawn_blocking(move || {
+        let mut conn_guard = entry_arc.connection.blocking_lock();
+        let managed_conn = &mut ***conn_guard;
+
+        let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let reader = managed_conn.get_table_types()?;
+
+            let mut channel_writer = ChannelWriter { sender: tx.clone() };
+            let schema = reader.schema();
+            let mut writer =
+                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+
+            for batch in reader {
+                let b = batch?;
+                writer.write(&b)?;
+            }
+            writer.finish()?;
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            tracing::error!("Streaming error: {}", e);
+            let _ = tx.blocking_send(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )));
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let body = axum::body::Body::from_stream(stream);
+
+    Ok(axum::response::Response::builder()
+        .header("Content-Type", "application/vnd.apache.arrow.stream")
+        .body(body)
+        .unwrap())
 }
 
 #[utoipa::path(
     get,
-    path = "/connections/{id}/tables/{table_name}/schema",
+    path = "/connections/tables/{table_name}/schema",
+    security(
+        ("bearer_auth" = [])
+    ),
     params(
-        ("id" = String, Path, description = "Connection ID"),
         ("table_name" = String, Path, description = "Table Name"),
         GetTableSchemaParams
     ),
@@ -1055,9 +1178,11 @@ async fn get_connection_table_types(
 )]
 async fn get_connection_table_schema(
     Extension(state): Extension<Arc<AppState>>,
-    Path((id, table_name)): Path<(String, String)>,
+    claims: ConnectionClaims,
+    Path(table_name): Path<String>,
     Query(params): Query<GetTableSchemaParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let id = claims.0.sub;
     let conn_entry = state.connection_registry.get(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", id),
