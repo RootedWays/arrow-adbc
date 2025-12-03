@@ -11,6 +11,8 @@ use std::env;
 use utoipa::ToSchema;
 
 const JWT_SECRET_ENV: &str = "JWT_SECRET";
+// In a production environment, this secret should be loaded from environment variables
+// and be a strong, randomly generated key. Do NOT use this default in production.
 const DEFAULT_SECRET: &str = "quiver_secret_key";
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]

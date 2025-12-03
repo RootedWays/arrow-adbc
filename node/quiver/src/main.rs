@@ -165,7 +165,6 @@ async fn query_connection_ipc(
     // Spawn blocking task to handle the entire Statement lifecycle (Create -> Execute -> Stream -> Drop)
     tokio::task::spawn_blocking(move || {
         // We use blocking_lock because we are in a blocking task.
-        // Ensure the connection isn't held too long, but we need it for the statement creation.
         let mut conn_guard = entry_arc.connection.blocking_lock();
         let managed_conn = &mut ***conn_guard;
 
@@ -189,7 +188,6 @@ async fn query_connection_ipc(
 
         if let Err(e) = result {
             tracing::error!("Streaming error: {}", e);
-            // Try to send error down channel if possible, or just close it
             let _ = tx.blocking_send(Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 e.to_string(),
@@ -225,10 +223,12 @@ async fn query_connection_ipc(
         prepare_statement,
         execute_statement_update,
         execute_statement_query,
+        bind_statement,
         get_connection_info,
         get_connection_objects,
         get_connection_table_types,
-        get_connection_table_schema
+        get_connection_table_schema,
+        query_connection_ipc
     ),
     components(schemas(
         CreateDatabaseRequest,
@@ -332,6 +332,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/connections/statements", post(create_statement))
         .route("/statements", delete(delete_statement))
         .route("/statements/sql", post(set_statement_sql_query))
+        .route("/statements/bind", post(bind_statement))
         .route("/statements/prepare", post(prepare_statement))
         .route("/statements/execute", post(execute_statement_query))
         .route("/statements/execute_update", post(execute_statement_update))
@@ -760,7 +761,7 @@ async fn delete_statement(
 }
 
 async fn handle_statement_action(
-    state: Extension<Arc<AppState>>,
+    state: Arc<AppState>,
     stmt_id: String,
     action: impl FnOnce(&mut ManagedStatement) -> Result<(), adbc_core::error::Error>,
     action_name: &str,
@@ -809,7 +810,7 @@ async fn handle_statement_action(
     ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to set SQL query"))
 )]
 async fn set_statement_sql_query(
-    state: Extension<Arc<AppState>>,
+    Extension(state): Extension<Arc<AppState>>,
     claims: StatementClaims,
     Json(payload): Json<SetSqlQueryRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
@@ -834,7 +835,7 @@ async fn set_statement_sql_query(
     ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to prepare statement"))
 )]
 async fn prepare_statement(
-    state: Extension<Arc<AppState>>,
+    Extension(state): Extension<Arc<AppState>>,
     claims: StatementClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_statement_action(
@@ -842,6 +843,59 @@ async fn prepare_statement(
         claims.0.sub,
         |stmt| stmt.prepare(),
         "prepare statement",
+    )
+    .await
+}
+
+#[utoipa::path(
+    post,
+    path = "/statements/bind",
+    security(
+        ("bearer_auth" = [])
+    ),
+    request_body = Vec<u8>,
+    responses((
+        status = 204,
+        description = "Parameters bound"
+    ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to bind parameters"))
+)]
+async fn bind_statement(
+    Extension(state): Extension<Arc<AppState>>,
+    claims: StatementClaims,
+    body: axum::body::Bytes,
+) -> Result<StatusCode, (StatusCode, String)> {
+    handle_statement_action(
+        state,
+        claims.0.sub,
+        move |stmt| {
+            let cursor = std::io::Cursor::new(body);
+            let reader = arrow::ipc::reader::StreamReader::try_new(cursor, None).map_err(|e| {
+                adbc_core::error::Error {
+                    message: format!("Failed to parse Arrow IPC: {}", e),
+                    status: adbc_core::error::Status::InvalidArguments,
+                    vendor_code: 0,
+                    sqlstate: [0; 5],
+                    details: None,
+                }
+            })?;
+
+            let batches: Vec<arrow::array::RecordBatch> = reader
+                .collect::<Result<_, _>>()
+                .map_err(|e| adbc_core::error::Error {
+                    message: format!("Failed to read batch: {}", e),
+                    status: adbc_core::error::Status::IO,
+                    vendor_code: 0,
+                    sqlstate: [0; 5],
+                    details: None,
+                })?;
+
+            if let Some(batch) = batches.first() {
+                stmt.bind(batch.clone())?;
+            }
+
+            Ok(())
+        },
+        "bind parameters",
     )
     .await
 }
@@ -858,7 +912,7 @@ async fn prepare_statement(
     ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to execute update"))
 )]
 async fn execute_statement_update(
-    state: Extension<Arc<AppState>>,
+    Extension(state): Extension<Arc<AppState>>,
     claims: StatementClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_statement_action(
@@ -902,7 +956,6 @@ async fn execute_statement_query(
     // Spawn blocking task
     tokio::task::spawn_blocking(move || {
         let mut stmt_guard = entry_arc.statement.blocking_lock();
-        // In adbc_driver_manager, ManagedStatement wraps the ADBC statement.
 
         let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let reader = stmt_guard.execute()?;
@@ -1173,7 +1226,8 @@ async fn get_connection_table_types(
     responses((
         status = 200,
         description = "Table schema",
-        body = Value
+        content_type = "application/vnd.apache.arrow.stream",
+        body = Vec<u8>
     ), (status = 404, description = "Connection not found"))
 )]
 async fn get_connection_table_schema(
@@ -1181,35 +1235,50 @@ async fn get_connection_table_schema(
     claims: ConnectionClaims,
     Path(table_name): Path<String>,
     Query(params): Query<GetTableSchemaParams>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let id = claims.0.sub;
     let conn_entry = state.connection_registry.get(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", id),
     ))?;
 
-    let mut conn_guard = conn_entry.connection.lock().await;
-    let managed_conn = &mut ***conn_guard;
+    let entry_arc = conn_entry.clone();
 
-    let schema = managed_conn
-        .get_table_schema(
-            params.catalog.as_deref(),
-            params.db_schema.as_deref(),
-            &table_name,
-        )
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get table schema: {}", e),
-            )
-        })?;
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(2);
 
-    let json_val = serde_json::to_value(schema).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Schema serialization error: {}", e),
-        )
-    })?;
+    tokio::task::spawn_blocking(move || {
+        let mut conn_guard = entry_arc.connection.blocking_lock();
+        let managed_conn = &mut ***conn_guard;
 
-    Ok(Json(json_val))
+        let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let schema = managed_conn.get_table_schema(
+                params.catalog.as_deref(),
+                params.db_schema.as_deref(),
+                &table_name,
+            )?;
+
+            let mut channel_writer = ChannelWriter { sender: tx.clone() };
+            // Write just the schema
+            let mut writer =
+                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+            writer.finish()?;
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            tracing::error!("Streaming error: {}", e);
+            let _ = tx.blocking_send(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )));
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let body = axum::body::Body::from_stream(stream);
+
+    Ok(axum::response::Response::builder()
+        .header("Content-Type", "application/vnd.apache.arrow.stream")
+        .body(body)
+        .unwrap())
 }

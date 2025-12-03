@@ -6,7 +6,6 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use serde_json::Value;
 use tower::util::ServiceExt;
 
 #[tokio::test]
@@ -92,7 +91,7 @@ async fn test_metadata_functions() {
         .unwrap();
     assert!(body.len() > 0);
 
-    // Get Schema (still JSON for now)
+    // Get Schema
     let response = app
         .clone()
         .oneshot(
@@ -106,13 +105,14 @@ async fn test_metadata_functions() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let schema: Value = serde_json::from_slice(
-        &axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(schema["fields"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        response.headers().get("Content-Type").unwrap(),
+        "application/vnd.apache.arrow.stream"
+    );
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(body.len() > 0);
 
     delete_statement(&app, &stmt_token).await;
     delete_connection(&app, &conn_token).await;

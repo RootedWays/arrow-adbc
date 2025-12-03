@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tower::util::ServiceExt;
 
 use crate::{
-    cancel_connection, commit_connection, connection_manager::ConnectionRegistry,
+    bind_statement, cancel_connection, commit_connection, connection_manager::ConnectionRegistry,
     create_connection, create_database, create_statement, database_manager::DatabaseRegistry,
     delete_connection as delete_connection_handler, delete_database as delete_database_handler,
     delete_statement as delete_statement_handler, driver_manager::DriverRegistry,
@@ -65,6 +65,7 @@ pub async fn app() -> Router {
         .route("/connections/statements", post(create_statement))
         .route("/statements", delete(delete_statement_handler))
         .route("/statements/sql", post(set_statement_sql_query))
+        .route("/statements/bind", post(bind_statement))
         .route("/statements/prepare", post(prepare_statement))
         .route("/statements/execute", post(execute_statement_query))
         .route("/statements/execute_update", post(execute_statement_update))

@@ -197,6 +197,48 @@
         ]
       }
     },
+    "/connections/query": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "query_connection_ipc",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Arrow IPC Stream",
+            "content": {
+              "application/vnd.apache.arrow.stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to execute query"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/connections/rollback": {
       "post": {
         "tags": [
@@ -320,8 +362,11 @@
           "200": {
             "description": "Table schema",
             "content": {
-              "application/json": {
-                "schema": {}
+              "application/vnd.apache.arrow.stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
               }
             }
           },
@@ -527,6 +572,41 @@
           },
           "404": {
             "description": "Statement not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/statements/bind": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "bind_statement",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Parameters bound"
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to bind parameters"
           }
         },
         "security": [

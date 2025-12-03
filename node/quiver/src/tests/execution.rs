@@ -81,6 +81,110 @@ async fn test_execute_query() {
 }
 
 #[tokio::test]
+async fn test_bind_parameters() {
+    let app = app().await;
+    let db_id = create_test_db(&app).await;
+    let conn_token = create_test_conn(&app, &db_id).await;
+
+    // Create Table
+    let stmt_token = create_test_stmt(&app, &conn_token).await;
+    exec_update(
+        &app,
+        &stmt_token,
+        "CREATE TABLE bind_test (id INT, val TEXT)",
+    )
+    .await;
+
+    // Prepare Insert Statement
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/statements/sql")
+                .header("Authorization", format!("Bearer {}", stmt_token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    r#"{ "query": "INSERT INTO bind_test VALUES (?, ?)" }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/statements/prepare")
+                .header("Authorization", format!("Bearer {}", stmt_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Create Parameter Batch
+    let id_array = arrow::array::Int32Array::from(vec![1, 2]);
+    let val_array = arrow::array::StringArray::from(vec!["one", "two"]);
+    let batch = arrow::array::RecordBatch::try_from_iter(vec![
+        (
+            "id",
+            std::sync::Arc::new(id_array) as arrow::array::ArrayRef,
+        ),
+        (
+            "val",
+            std::sync::Arc::new(val_array) as arrow::array::ArrayRef,
+        ),
+    ])
+    .unwrap();
+
+    // Serialize to IPC
+    let mut buf = Vec::new();
+    {
+        let mut writer =
+            arrow::ipc::writer::StreamWriter::try_new(&mut buf, &batch.schema()).unwrap();
+        writer.write(&batch).unwrap();
+        writer.finish().unwrap();
+    }
+
+    // Bind Parameters
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/statements/bind")
+                .header("Authorization", format!("Bearer {}", stmt_token))
+                .header("Content-Type", "application/vnd.apache.arrow.stream")
+                .body(Body::from(buf))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // Execute Update
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/statements/execute_update")
+                .header("Authorization", format!("Bearer {}", stmt_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    delete_statement(&app, &stmt_token).await;
+    delete_connection(&app, &conn_token).await;
+    delete_database(&app, &db_id).await;
+}
+#[tokio::test]
 async fn test_execute_query_ipc() {
     let app = app().await;
     let db_id = create_test_db(&app).await;
