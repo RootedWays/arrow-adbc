@@ -134,21 +134,21 @@ export interface AdbcConnection {
    * @param key The option name (e.g., "adbc.connection.autocommit").
    * @param value The option value.
    */
-  setOption(key: string, value: string): void;
+  setOption(key: string, value: string): Promise<void>;
 
   /**
    * Toggle autocommit behavior.
    * 
    * @param enabled Whether autocommit should be enabled.
    */
-  setAutoCommit(enabled: boolean): void;
+  setAutoCommit(enabled: boolean): Promise<void>;
 
   /**
    * Toggle read-only mode.
    * 
    * @param enabled Whether the connection should be read-only.
    */
-  setReadOnly(enabled: boolean): void;
+  setReadOnly(enabled: boolean): Promise<void>;
   
   /** 
    * Get a hierarchical view of database objects (catalogs, schemas, tables, columns).
@@ -222,7 +222,7 @@ export interface AdbcStatement {
    * @param key The option name (e.g., "adbc.ingest.target_table").
    * @param value The option value.
    */
-  setOption(key: string, value: string): void;
+  setOption(key: string, value: string): Promise<void>;
 
   /** 
    * Execute the query and return a stream of results. 

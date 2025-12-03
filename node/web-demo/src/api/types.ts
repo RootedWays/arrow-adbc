@@ -82,6 +82,13 @@ export type DatabaseInfo = {
   id: string;
 };
 
+export type QueryRequest = {
+  /**
+   * @type string
+   */
+  query: string;
+};
+
 export type SetSqlQueryRequest = {
   /**
    * @type string
@@ -153,7 +160,7 @@ export type CommitConnectionMutation = {
 /**
  * @description Database metadata info
  */
-export type GetConnectionInfo200 = any[];
+export type GetConnectionInfo200 = Blob;
 
 /**
  * @description Connection not found
@@ -198,7 +205,7 @@ export type GetConnectionObjectsQueryParams = {
 /**
  * @description Database objects
  */
-export type GetConnectionObjects200 = any[];
+export type GetConnectionObjects200 = Blob;
 
 /**
  * @description Connection not found
@@ -211,6 +218,31 @@ export type GetConnectionObjectsQuery = {
   Response: GetConnectionObjects200;
   QueryParams: GetConnectionObjectsQueryParams;
   Errors: GetConnectionObjects404;
+};
+
+/**
+ * @description Arrow IPC Stream
+ */
+export type QueryConnectionIpc200 = Blob;
+
+/**
+ * @description Connection not found
+ */
+export type QueryConnectionIpc404 = any;
+
+/**
+ * @description Failed to execute query
+ */
+export type QueryConnectionIpc500 = any;
+
+export type QueryConnectionIpcMutationRequest = QueryRequest;
+
+export type QueryConnectionIpcMutationResponse = QueryConnectionIpc200;
+
+export type QueryConnectionIpcMutation = {
+  Response: QueryConnectionIpc200;
+  Request: QueryConnectionIpcMutationRequest;
+  Errors: QueryConnectionIpc404 | QueryConnectionIpc500;
 };
 
 /**
@@ -260,7 +292,7 @@ export type CreateStatementMutation = {
 /**
  * @description Table types
  */
-export type GetConnectionTableTypes200 = any[];
+export type GetConnectionTableTypes200 = Blob;
 
 /**
  * @description Connection not found
@@ -453,7 +485,7 @@ export type DeleteStatementMutation = {
 /**
  * @description Query executed
  */
-export type ExecuteStatementQuery200 = any[];
+export type ExecuteStatementQuery200 = Blob;
 
 /**
  * @description Statement not found

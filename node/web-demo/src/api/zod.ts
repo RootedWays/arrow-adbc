@@ -41,6 +41,10 @@ export const databaseInfoSchema = z.object({
   id: z.string(),
 });
 
+export const queryRequestSchema = z.object({
+  query: z.string(),
+});
+
 export const setSqlQueryRequestSchema = z.object({
   query: z.string(),
 });
@@ -100,7 +104,7 @@ export const commitConnectionMutationResponseSchema = z.lazy(
 /**
  * @description Database metadata info
  */
-export const getConnectionInfo200Schema = z.array(z.any());
+export const getConnectionInfo200Schema = z.instanceof(File);
 
 /**
  * @description Connection not found
@@ -125,7 +129,7 @@ export const getConnectionObjectsQueryParamsSchema = z
 /**
  * @description Database objects
  */
-export const getConnectionObjects200Schema = z.array(z.any());
+export const getConnectionObjects200Schema = z.instanceof(File);
 
 /**
  * @description Connection not found
@@ -134,6 +138,29 @@ export const getConnectionObjects404Schema = z.any();
 
 export const getConnectionObjectsQueryResponseSchema = z.lazy(
   () => getConnectionObjects200Schema,
+);
+
+/**
+ * @description Arrow IPC Stream
+ */
+export const queryConnectionIpc200Schema = z.instanceof(File);
+
+/**
+ * @description Connection not found
+ */
+export const queryConnectionIpc404Schema = z.any();
+
+/**
+ * @description Failed to execute query
+ */
+export const queryConnectionIpc500Schema = z.any();
+
+export const queryConnectionIpcMutationRequestSchema = z.lazy(
+  () => queryRequestSchema,
+);
+
+export const queryConnectionIpcMutationResponseSchema = z.lazy(
+  () => queryConnectionIpc200Schema,
 );
 
 /**
@@ -179,7 +206,7 @@ export const createStatementMutationResponseSchema = z.lazy(
 /**
  * @description Table types
  */
-export const getConnectionTableTypes200Schema = z.array(z.any());
+export const getConnectionTableTypes200Schema = z.instanceof(File);
 
 /**
  * @description Connection not found
@@ -331,7 +358,7 @@ export const deleteStatementMutationResponseSchema = z.lazy(
 /**
  * @description Query executed
  */
-export const executeStatementQuery200Schema = z.array(z.any());
+export const executeStatementQuery200Schema = z.instanceof(File);
 
 /**
  * @description Statement not found

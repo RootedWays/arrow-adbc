@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "required": ["query"],
+  "properties": { "query": { "type": "string" } },
+  "x-readme-ref-name": "QueryRequest"
+}

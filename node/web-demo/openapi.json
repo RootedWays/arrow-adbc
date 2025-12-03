@@ -11,7 +11,9 @@
   "paths": {
     "/connections": {
       "delete": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "delete_connection",
         "responses": {
           "204": {
@@ -30,7 +32,9 @@
     },
     "/connections/cancel": {
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "cancel_connection",
         "responses": {
           "204": {
@@ -52,7 +56,9 @@
     },
     "/connections/commit": {
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "commit_connection",
         "responses": {
           "204": {
@@ -74,16 +80,18 @@
     },
     "/connections/info": {
       "get": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "get_connection_info",
         "responses": {
           "200": {
             "description": "Database metadata info",
             "content": {
-              "application/json": {
+              "application/vnd.apache.arrow.stream": {
                 "schema": {
-                  "type": "array",
-                  "items": {}
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -101,7 +109,9 @@
     },
     "/connections/objects": {
       "get": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "get_connection_objects",
         "parameters": [
           {
@@ -168,10 +178,10 @@
           "200": {
             "description": "Database objects",
             "content": {
-              "application/json": {
+              "application/vnd.apache.arrow.stream": {
                 "schema": {
-                  "type": "array",
-                  "items": {}
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -187,9 +197,87 @@
         ]
       }
     },
+    "/connections/options": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "set_connection_option",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetOptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Option set"
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to set option"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/connections/query": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "query_connection_ipc",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Arrow IPC Stream",
+            "content": {
+              "application/vnd.apache.arrow.stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection not found"
+          },
+          "500": {
+            "description": "Failed to execute query"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/connections/rollback": {
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "rollback_connection",
         "responses": {
           "204": {
@@ -211,7 +299,9 @@
     },
     "/connections/statements": {
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "create_statement",
         "responses": {
           "200": {
@@ -240,16 +330,18 @@
     },
     "/connections/table-types": {
       "get": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "get_connection_table_types",
         "responses": {
           "200": {
             "description": "Table types",
             "content": {
-              "application/json": {
+              "application/vnd.apache.arrow.stream": {
                 "schema": {
-                  "type": "array",
-                  "items": {}
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -267,7 +359,9 @@
     },
     "/connections/tables/{table_name}/schema": {
       "get": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "get_connection_table_schema",
         "parameters": [
           {
@@ -302,8 +396,11 @@
           "200": {
             "description": "Table schema",
             "content": {
-              "application/json": {
-                "schema": {}
+              "application/vnd.apache.arrow.stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
               }
             }
           },
@@ -320,7 +417,9 @@
     },
     "/databases": {
       "get": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "list_databases",
         "responses": {
           "200": {
@@ -339,7 +438,9 @@
         }
       },
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "create_database",
         "requestBody": {
           "content": {
@@ -373,7 +474,9 @@
     },
     "/databases/{id}": {
       "delete": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "delete_database",
         "parameters": [
           {
@@ -398,7 +501,9 @@
     },
     "/databases/{id}/connections": {
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "create_connection",
         "parameters": [
           {
@@ -448,7 +553,9 @@
     },
     "/drivers": {
       "get": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "list_drivers",
         "responses": {
           "200": {
@@ -469,7 +576,9 @@
     },
     "/health": {
       "get": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "health_check",
         "responses": {
           "200": {
@@ -487,7 +596,9 @@
     },
     "/statements": {
       "delete": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "delete_statement",
         "responses": {
           "204": {
@@ -504,18 +615,55 @@
         ]
       }
     },
+    "/statements/bind": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "bind_statement",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Parameters bound"
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to bind parameters"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/statements/execute": {
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "execute_statement_query",
         "responses": {
           "200": {
             "description": "Query executed",
             "content": {
-              "application/json": {
+              "application/vnd.apache.arrow.stream": {
                 "schema": {
-                  "type": "array",
-                  "items": {}
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -536,7 +684,9 @@
     },
     "/statements/execute_update": {
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "execute_statement_update",
         "responses": {
           "204": {
@@ -556,9 +706,45 @@
         ]
       }
     },
+    "/statements/options": {
+      "post": {
+        "tags": [
+          "crate"
+        ],
+        "operationId": "set_statement_option",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetOptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Option set"
+          },
+          "404": {
+            "description": "Statement not found"
+          },
+          "500": {
+            "description": "Failed to set option"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/statements/prepare": {
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "prepare_statement",
         "responses": {
           "204": {
@@ -580,7 +766,9 @@
     },
     "/statements/sql": {
       "post": {
-        "tags": ["crate"],
+        "tags": [
+          "crate"
+        ],
         "operationId": "set_statement_sql_query",
         "requestBody": {
           "content": {
@@ -615,7 +803,11 @@
     "schemas": {
       "Claims": {
         "type": "object",
-        "required": ["sub", "scope", "exp"],
+        "required": [
+          "sub",
+          "scope",
+          "exp"
+        ],
         "properties": {
           "exp": {
             "type": "integer",
@@ -643,7 +835,9 @@
       },
       "CreateConnectionResponse": {
         "type": "object",
-        "required": ["token"],
+        "required": [
+          "token"
+        ],
         "properties": {
           "token": {
             "type": "string"
@@ -652,7 +846,9 @@
       },
       "CreateDatabaseRequest": {
         "type": "object",
-        "required": ["driver"],
+        "required": [
+          "driver"
+        ],
         "properties": {
           "driver": {
             "type": "string",
@@ -668,7 +864,9 @@
       },
       "CreateDatabaseResponse": {
         "type": "object",
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -677,7 +875,9 @@
       },
       "CreateStatementResponse": {
         "type": "object",
-        "required": ["token"],
+        "required": [
+          "token"
+        ],
         "properties": {
           "token": {
             "type": "string"
@@ -686,7 +886,10 @@
       },
       "DatabaseInfo": {
         "type": "object",
-        "required": ["id", "driver_name"],
+        "required": [
+          "id",
+          "driver_name"
+        ],
         "properties": {
           "driver_name": {
             "type": "string"
@@ -696,13 +899,44 @@
           }
         }
       },
+      "QueryRequest": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      },
       "Scope": {
         "type": "string",
-        "enum": ["Connection", "Statement"]
+        "enum": [
+          "Connection",
+          "Statement"
+        ]
+      },
+      "SetOptionRequest": {
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
       },
       "SetSqlQueryRequest": {
         "type": "object",
-        "required": ["query"],
+        "required": [
+          "query"
+        ],
         "properties": {
           "query": {
             "type": "string"
