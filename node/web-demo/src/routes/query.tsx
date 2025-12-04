@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createFileRoute } from "@tanstack/react-router";
-import { useConnections } from "@/lib/connections-context";
+import { useAppStore } from "@/lib/store";
 import { useListDatabases } from "@/api/hooks/useListDatabases";
 
 const searchSchema = z.object({
@@ -38,12 +38,21 @@ export const Route = createFileRoute("/query")({
 function QueryEditor() {
   const { dbId } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { getConnection, establishConnection } = useConnections();
+  
+  const getConnection = useAppStore((state) => state.getConnection);
+  const establishConnection = useAppStore((state) => state.establishConnection);
+  const activeConn = useAppStore((state) => dbId ? state.connections[dbId] : undefined);
+  
+  const runQuery = useAppStore((state) => state.runQuery);
+  const results = useAppStore((state) => state.queryResults);
+  const loading = useAppStore((state) => state.isQueryRunning);
+  const error = useAppStore((state) => state.queryError);
+
   const { data: databases } = useListDatabases();
 
   // Auto-connect effect
   useEffect(() => {
-    if (dbId && !getConnection(dbId) && databases) {
+    if (dbId && !activeConn && databases) {
       const dbInfo = databases.find((d) => d.id === dbId);
       if (dbInfo) {
         establishConnection(dbId, {
@@ -51,71 +60,33 @@ function QueryEditor() {
           databaseOptions: { id: dbId },
         }).catch((err) => {
           console.error("Failed to auto-connect:", err);
-          setError("Failed to establish connection to selected database.");
+          toast.error("Connection Failed", { description: "Could not connect to selected database." });
         });
       }
     }
-  }, [dbId, databases, getConnection, establishConnection]);
-
-  const activeConn = dbId ? getConnection(dbId) : undefined;
+  }, [dbId, activeConn, databases, establishConnection]);
 
   const [query, setQuery] = useState(`SELECT * FROM sqlite_master`);
-  const [results, setResults] = useState<ArrowTable | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Reset state when switching DBs
+  // Handle DB change: maybe clear results? 
+  // Store logic handles clearing on new runQuery, but switching DB might want to clear view.
   useEffect(() => {
-    setResults(null);
-    setError(null);
-    // Optionally reset query or keep it
+     // Optional: Clear results in store if needed, but for now we just switch context.
   }, [dbId]);
 
   const handleDbChange = (newDbId: string) => {
     navigate({ search: { dbId: newDbId } });
   };
 
-  const handleRunQuery = async () => {
-    if (!activeConn) {
-      setError("No database selected.");
-      return;
+  const handleRunQuery = () => {
+    if (!dbId) {
+        toast.error("No Database Selected");
+        return;
     }
-
-    setLoading(true);
-    setError(null);
-    setResults(null);
-
-    let statement;
-    try {
-      const connection = activeConn.connection;
-      statement = await connection.createStatement();
-
-      await statement.setSqlQuery(query);
-      const reader = await statement.executeQuery();
-
-      const batches = [];
-      for await (const batch of reader) {
-        batches.push(batch);
-      }
-      if (batches.length > 0) {
-        setResults(new ArrowTable([batches[0]]));
-      } else {
-        setResults(null);
-      }
-    } catch (err) {
-      console.error(err);
-      const message = err instanceof Error ? err.message : "An unknown error occurred";
-      setError(message);
-      toast.error("Query Failed", {
-        description: message,
-      });
-    } finally {
-      if (statement) {
-        await statement.close();
-      }
-      setLoading(false);
-    }
+    runQuery(dbId, query);
   };
+
+  const connectionList = databases || [];
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -218,7 +189,7 @@ function QueryEditor() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {Array.from(results).map((row, i) => (
+                      {Array.from(results.slice(0, 100)).map((row, i) => (
                         <TableRow key={i}>
                           {results.schema.fields.map((field) => (
                             <TableCell key={field.name} className="whitespace-nowrap font-mono text-xs">
@@ -234,7 +205,7 @@ function QueryEditor() {
             </CardContent>
             {results && (
               <div className="p-2 border-t bg-muted/20 text-xs text-muted-foreground text-right">
-                {results.numRows} rows
+                Showing {Math.min(results.numRows, 100)} of {results.numRows} rows
               </div>
             )}
           </Card>

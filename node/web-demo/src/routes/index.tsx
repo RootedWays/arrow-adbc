@@ -4,7 +4,7 @@ import { useListDatabases, listDatabasesQueryKey } from "@/api/hooks/useListData
 import { useCreateDatabase } from "@/api/hooks/useCreateDatabase";
 import { useDeleteDatabase } from "@/api/hooks/useDeleteDatabase";
 import { useQueryClient } from "@tanstack/react-query";
-import { useConnections } from "@/lib/connections-context"; // Import useConnections
+import { useAppStore } from "@/lib/store";
 
 import {
   Card,
@@ -66,7 +66,10 @@ function Dashboard() {
   } = useListDatabases();
   const { mutateAsync: createDatabaseMutation, isPending: isCreatingDatabase } = useCreateDatabase(); // Use mutateAsync
   const { mutate: deleteDatabaseMutation } = useDeleteDatabase();
-  const { establishConnection, closeConnection } = useConnections(); // Use connections context
+  
+  const establishConnection = useAppStore((state) => state.establishConnection);
+  const closeConnection = useAppStore((state) => state.closeConnection);
+  
   const queryClient = useQueryClient();
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
