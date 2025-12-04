@@ -112,6 +112,7 @@ export class AdbcDatabase implements AdbcDatabaseInterface {
  */
 export class AdbcConnection implements AdbcConnectionInterface {
     private _inner: NativeAdbcConnection;
+    public readonly token: string = "";
 
     constructor(inner: NativeAdbcConnection) {
         this._inner = inner;
@@ -131,7 +132,7 @@ export class AdbcConnection implements AdbcConnectionInterface {
      * @param key The option name.
      * @param value The option value.
      */
-    setOption(key: string, value: string): void {
+    async setOption(key: string, value: string): Promise<void> {
         this._inner.setOption(key, value);
     }
 
@@ -139,16 +140,16 @@ export class AdbcConnection implements AdbcConnectionInterface {
      * Toggle autocommit behavior.
      * @param enabled Whether autocommit should be enabled.
      */
-    setAutoCommit(enabled: boolean): void {
-        this.setOption("autocommit", enabled ? "true" : "false");
+    async setAutoCommit(enabled: boolean): Promise<void> {
+        return this.setOption("autocommit", enabled ? "true" : "false");
     }
 
     /**
      * Toggle read-only mode.
      * @param enabled Whether the connection should be read-only.
      */
-    setReadOnly(enabled: boolean): void {
-        this.setOption("readonly", enabled ? "true" : "false");
+    async setReadOnly(enabled: boolean): Promise<void> {
+        return this.setOption("readonly", enabled ? "true" : "false");
     }
 
     /**
@@ -289,7 +290,7 @@ export class AdbcStatement implements AdbcStatementInterface {
      * @param key The option name.
      * @param value The option value.
      */
-    setOption(key: string, value: string): void {
+    async setOption(key: string, value: string): Promise<void> {
         this._inner.setOption(key, value);
     }
 

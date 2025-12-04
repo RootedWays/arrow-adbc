@@ -2,6 +2,7 @@ import { defineConfig } from "@kubb/core";
 import { pluginOas } from "@kubb/plugin-oas";
 import { pluginTs } from "@kubb/plugin-ts";
 import { pluginZod } from "@kubb/plugin-zod";
+import { pluginReactQuery } from "@kubb/plugin-react-query";
 
 export default defineConfig({
   root: ".",
@@ -27,6 +28,24 @@ export default defineConfig({
       output: {
         path: "zod.ts",
       },
+    }),
+    pluginReactQuery({
+      output: {
+        path: "hooks",
+      },
+      client: {
+        importPath: "@/lib/client",
+        importAs: "client",
+        dataReturnType: "data",
+      },
+      mutation: {
+        methods: ["post", "put", "delete"],
+      },
+      query: {
+        methods: ["get"],
+        importPath: "@tanstack/react-query",
+      },
+      suspense: {},
     }),
   ],
 });

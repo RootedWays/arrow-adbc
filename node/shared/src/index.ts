@@ -114,20 +114,21 @@ export interface AdbcDatabase {
   close(): Promise<void>;
 }
 
-/**
- * Represents a single connection to a database.
- * 
- * An AdbcConnection maintains the state of a connection to the database, such as
- * current transaction state and session options.
- */
+  /**
+   * Represents a single connection to a database.
+   *
+   * An AdbcConnection maintains the state of a connection to the database, such as
+   * current transaction state and session options.
+   */
 export interface AdbcConnection {
-  /** 
-   * Create a new statement for executing queries. 
-   * 
+  readonly token: string; // JWT token for this connection instance
+
+  /**
+   * Create a new statement for executing queries.
+   *
    * @returns A Promise resolving to a new AdbcStatement.
    */
-  createStatement(): Promise<AdbcStatement>;
-  
+  createStatement(): Promise<AdbcStatement>;  
   /** 
    * Set an option on the connection. 
    * 

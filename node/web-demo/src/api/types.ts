@@ -89,6 +89,17 @@ export type QueryRequest = {
   query: string;
 };
 
+export type SetOptionRequest = {
+  /**
+   * @type string
+   */
+  key: string;
+  /**
+   * @type string
+   */
+  value: string;
+};
+
 export type SetSqlQueryRequest = {
   /**
    * @type string
@@ -221,6 +232,31 @@ export type GetConnectionObjectsQuery = {
 };
 
 /**
+ * @description Option set
+ */
+export type SetConnectionOption204 = any;
+
+/**
+ * @description Connection not found
+ */
+export type SetConnectionOption404 = any;
+
+/**
+ * @description Failed to set option
+ */
+export type SetConnectionOption500 = any;
+
+export type SetConnectionOptionMutationRequest = SetOptionRequest;
+
+export type SetConnectionOptionMutationResponse = SetConnectionOption204;
+
+export type SetConnectionOptionMutation = {
+  Response: SetConnectionOption204;
+  Request: SetConnectionOptionMutationRequest;
+  Errors: SetConnectionOption404 | SetConnectionOption500;
+};
+
+/**
  * @description Arrow IPC Stream
  */
 export type QueryConnectionIpc200 = Blob;
@@ -328,7 +364,7 @@ export type GetConnectionTableSchemaQueryParams = {
 /**
  * @description Table schema
  */
-export type GetConnectionTableSchema200 = any;
+export type GetConnectionTableSchema200 = Blob;
 
 /**
  * @description Connection not found
@@ -483,6 +519,31 @@ export type DeleteStatementMutation = {
 };
 
 /**
+ * @description Parameters bound
+ */
+export type BindStatement204 = any;
+
+/**
+ * @description Statement not found
+ */
+export type BindStatement404 = any;
+
+/**
+ * @description Failed to bind parameters
+ */
+export type BindStatement500 = any;
+
+export type BindStatementMutationRequest = Blob;
+
+export type BindStatementMutationResponse = BindStatement204;
+
+export type BindStatementMutation = {
+  Response: BindStatement204;
+  Request: BindStatementMutationRequest;
+  Errors: BindStatement404 | BindStatement500;
+};
+
+/**
  * @description Query executed
  */
 export type ExecuteStatementQuery200 = Blob;
@@ -524,6 +585,31 @@ export type ExecuteStatementUpdateMutationResponse = ExecuteStatementUpdate204;
 export type ExecuteStatementUpdateMutation = {
   Response: ExecuteStatementUpdate204;
   Errors: ExecuteStatementUpdate404 | ExecuteStatementUpdate500;
+};
+
+/**
+ * @description Option set
+ */
+export type SetStatementOption204 = any;
+
+/**
+ * @description Statement not found
+ */
+export type SetStatementOption404 = any;
+
+/**
+ * @description Failed to set option
+ */
+export type SetStatementOption500 = any;
+
+export type SetStatementOptionMutationRequest = SetOptionRequest;
+
+export type SetStatementOptionMutationResponse = SetStatementOption204;
+
+export type SetStatementOptionMutation = {
+  Response: SetStatementOption204;
+  Request: SetStatementOptionMutationRequest;
+  Errors: SetStatementOption404 | SetStatementOption500;
 };
 
 /**

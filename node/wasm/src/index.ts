@@ -59,6 +59,9 @@ class HttpDatabase implements AdbcDatabaseInterface {
   constructor(url: string, options: ConnectOptions) {
     this._url = url
     this._options = options
+    if (this._options.databaseOptions && this._options.databaseOptions.id) {
+      this._dbId = this._options.databaseOptions.id
+    }
   }
 
   private async _initDatabase(): Promise<string> {
@@ -103,7 +106,7 @@ class HttpDatabase implements AdbcDatabaseInterface {
     const dbId = await this._initPromise
 
     // Filter out database-specific options that shouldn't be passed to connection
-    const { backend_driver, uri, ...connOptions } = this._options.databaseOptions || {}
+    const { backend_driver, uri, id, ...connOptions } = this._options.databaseOptions || {}
 
     const response = await fetch(`${this._url}/databases/${dbId}/connections`, {
       method: 'POST',
@@ -140,16 +143,16 @@ class HttpDatabase implements AdbcDatabaseInterface {
 
 class HttpConnection implements AdbcConnectionInterface {
   private _url: string
-  private _token: string
+  public readonly token: string
 
   constructor(url: string, token: string) {
     this._url = url
-    this._token = token
+    this.token = token
   }
 
   private _authHeaders(): HeadersInit {
     return {
-      Authorization: `Bearer ${this._token}`,
+      Authorization: `Bearer ${this.token}`,
       'Content-Type': 'application/json',
     }
   }
@@ -348,16 +351,19 @@ class HttpStatement implements AdbcStatementInterface {
   }
 
   async bind(data: RecordBatch | Table): Promise<void> {
+    // Ensure data is a Table for tableToIPC
+    const tableData = data instanceof RecordBatch ? new Table([data]) : data;
     // Serialize Arrow data to IPC format
-    const buffer = tableToIPC(data);
+    const buffer = tableToIPC(tableData);
+    const plainBuffer = new Uint8Array(buffer).slice().buffer; // Ensure it's a plain ArrayBuffer
 
     const response = await fetch(`${this._url}/statements/bind`, {
         method: 'POST',
         headers: {
             ...this._authHeaders(),
-            'Content-Type': 'application/octet-stream'
+            'Content-Type': 'application/octet-stream' // Explicitly set Content-Type
         } as HeadersInit,
-        body: buffer
+        body: new Blob([plainBuffer]) // Wrap plain buffer in Blob for explicit BodyInit type
     });
 
     if (!response.ok) {

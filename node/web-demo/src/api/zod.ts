@@ -45,6 +45,11 @@ export const queryRequestSchema = z.object({
   query: z.string(),
 });
 
+export const setOptionRequestSchema = z.object({
+  key: z.string(),
+  value: z.string(),
+});
+
 export const setSqlQueryRequestSchema = z.object({
   query: z.string(),
 });
@@ -141,6 +146,29 @@ export const getConnectionObjectsQueryResponseSchema = z.lazy(
 );
 
 /**
+ * @description Option set
+ */
+export const setConnectionOption204Schema = z.any();
+
+/**
+ * @description Connection not found
+ */
+export const setConnectionOption404Schema = z.any();
+
+/**
+ * @description Failed to set option
+ */
+export const setConnectionOption500Schema = z.any();
+
+export const setConnectionOptionMutationRequestSchema = z.lazy(
+  () => setOptionRequestSchema,
+);
+
+export const setConnectionOptionMutationResponseSchema = z.lazy(
+  () => setConnectionOption204Schema,
+);
+
+/**
  * @description Arrow IPC Stream
  */
 export const queryConnectionIpc200Schema = z.instanceof(File);
@@ -231,7 +259,7 @@ export const getConnectionTableSchemaQueryParamsSchema = z
 /**
  * @description Table schema
  */
-export const getConnectionTableSchema200Schema = z.any();
+export const getConnectionTableSchema200Schema = z.instanceof(File);
 
 /**
  * @description Connection not found
@@ -356,6 +384,27 @@ export const deleteStatementMutationResponseSchema = z.lazy(
 );
 
 /**
+ * @description Parameters bound
+ */
+export const bindStatement204Schema = z.any();
+
+/**
+ * @description Statement not found
+ */
+export const bindStatement404Schema = z.any();
+
+/**
+ * @description Failed to bind parameters
+ */
+export const bindStatement500Schema = z.any();
+
+export const bindStatementMutationRequestSchema = z.instanceof(File);
+
+export const bindStatementMutationResponseSchema = z.lazy(
+  () => bindStatement204Schema,
+);
+
+/**
  * @description Query executed
  */
 export const executeStatementQuery200Schema = z.instanceof(File);
@@ -391,6 +440,29 @@ export const executeStatementUpdate500Schema = z.any();
 
 export const executeStatementUpdateMutationResponseSchema = z.lazy(
   () => executeStatementUpdate204Schema,
+);
+
+/**
+ * @description Option set
+ */
+export const setStatementOption204Schema = z.any();
+
+/**
+ * @description Statement not found
+ */
+export const setStatementOption404Schema = z.any();
+
+/**
+ * @description Failed to set option
+ */
+export const setStatementOption500Schema = z.any();
+
+export const setStatementOptionMutationRequestSchema = z.lazy(
+  () => setOptionRequestSchema,
+);
+
+export const setStatementOptionMutationResponseSchema = z.lazy(
+  () => setStatementOption204Schema,
 );
 
 /**

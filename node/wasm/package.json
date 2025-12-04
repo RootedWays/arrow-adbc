@@ -1,8 +1,12 @@
 {
   "name": "adbc-node-wasm",
   "version": "0.0.1",
+  "type": "module",
   "description": "WASM ADBC Driver Manager",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "types": "dist/index.d.ts",
   "files": [
     "dist"
