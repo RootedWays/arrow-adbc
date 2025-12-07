@@ -14,6 +14,8 @@ use clap::Parser;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tower::ServiceBuilder;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -26,7 +28,7 @@ mod statement_manager;
 
 use crate::auth::{sign_token, ConnectionClaims, Scope, StatementClaims};
 use crate::connection_manager::ConnectionRegistry;
-use crate::database_manager::DatabaseRegistry;
+use crate::database_manager::{DatabaseInfo, DatabaseRegistry};
 use crate::driver_manager::DriverRegistry;
 use crate::statement_manager::StatementRegistry;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
@@ -73,6 +75,9 @@ struct CreateDatabaseRequest {
     driver: String,
     #[serde(default)]
     options: HashMap<String, String>,
+    #[serde(default)]
+    #[schema(example = "my_database")]
+    name: Option<String>,
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -107,6 +112,76 @@ struct QueryRequest {
     query: String,
 }
 
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct SetOptionRequest {
+    key: String,
+    value: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/connections/options",
+    security(
+        ("bearer_auth" = [])
+    ),
+    request_body = SetOptionRequest,
+    responses((
+        status = 204,
+        description = "Option set"
+    ), (status = 404, description = "Connection not found"), (status = 500, description = "Failed to set option"))
+)]
+async fn set_connection_option(
+    Extension(state): Extension<Arc<AppState>>,
+    claims: ConnectionClaims,
+    Json(payload): Json<SetOptionRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    handle_connection_action(
+        state,
+        claims.connection_id,
+        move |conn| {
+            let opt_key = match payload.key.to_lowercase().as_str() {
+                "adbc.connection.autocommit" => OptionConnection::AutoCommit,
+                "adbc.connection.readonly" => OptionConnection::ReadOnly,
+                _ => OptionConnection::Other(payload.key),
+            };
+            let opt_val = OptionValue::String(payload.value);
+            Optionable::set_option(conn, opt_key, opt_val)
+        },
+        "set option",
+    )
+    .await
+}
+
+#[utoipa::path(
+    post,
+    path = "/statements/options",
+    security(
+        ("bearer_auth" = [])
+    ),
+    request_body = SetOptionRequest,
+    responses((
+        status = 204,
+        description = "Option set"
+    ), (status = 404, description = "Statement not found"), (status = 500, description = "Failed to set option"))
+)]
+async fn set_statement_option(
+    Extension(state): Extension<Arc<AppState>>,
+    claims: StatementClaims,
+    Json(payload): Json<SetOptionRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    handle_statement_action(
+        state,
+        claims.statement_id,
+        move |stmt| {
+            let opt_key = adbc_core::options::OptionStatement::Other(payload.key);
+            let opt_val = OptionValue::String(payload.value);
+            Optionable::set_option(stmt, opt_key, opt_val)
+        },
+        "set option",
+    )
+    .await
+}
+
 // A bridge to write to a Tokio channel from a synchronous Writer
 struct ChannelWriter {
     sender: tokio::sync::mpsc::Sender<Result<axum::body::Bytes, std::io::Error>>,
@@ -130,6 +205,95 @@ impl std::io::Write for ChannelWriter {
     }
 }
 
+// Configuration
+const TARGET_BATCH_SIZE_BYTES: usize = 10 * 1024 * 1024; // 10 MB chunks
+
+// Your accumulation state
+struct BatchBuffer {
+    batches: Vec<arrow::array::RecordBatch>,
+    current_size: usize,
+    schema: arrow::datatypes::SchemaRef,
+}
+
+impl BatchBuffer {
+    fn new(schema: arrow::datatypes::SchemaRef) -> Self {
+        Self {
+            batches: Vec::new(),
+            current_size: 0,
+            schema,
+        }
+    }
+
+    fn push(&mut self, batch: arrow::array::RecordBatch) {
+        // arrow-rs provides a helper to get exact memory size
+        self.current_size += batch.get_array_memory_size();
+        self.batches.push(batch);
+    }
+
+    fn should_flush(&self) -> bool {
+        self.current_size >= TARGET_BATCH_SIZE_BYTES
+    }
+
+    fn flush(&mut self) -> Option<arrow::array::RecordBatch> {
+        if self.batches.is_empty() {
+            return None;
+        }
+
+        // The Magic: Zero-copy concatenation (mostly)
+        // This merges the small batches into one large contiguous batch
+        let big_batch = arrow::compute::concat_batches(&self.schema, &self.batches).ok()?;
+
+        // Reset
+        self.batches.clear();
+        self.current_size = 0;
+
+        Some(big_batch)
+    }
+}
+
+fn write_coalesced<W: std::io::Write>(
+    mut writer: arrow::ipc::writer::StreamWriter<W>,
+    reader: impl arrow::array::RecordBatchReader,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut buffer = BatchBuffer::new(reader.schema());
+
+    for batch_result in reader {
+        let batch = batch_result?;
+
+        if batch.num_rows() == 0 {
+            continue;
+        }
+
+        buffer.push(batch);
+
+        if buffer.should_flush() {
+            if let Some(big_batch) = buffer.flush() {
+                let batch_size_bytes = big_batch.get_array_memory_size();
+                tracing::debug!(
+                    "Writing coalesced batch: {} rows, {} bytes",
+                    big_batch.num_rows(),
+                    batch_size_bytes
+                );
+                writer.write(&big_batch)?;
+            }
+        }
+    }
+
+    // Don't forget the leftovers!
+    if let Some(last_batch) = buffer.flush() {
+        let batch_size_bytes = last_batch.get_array_memory_size();
+        tracing::debug!(
+            "Writing remaining coalesced batch: {} rows, {} bytes",
+            last_batch.num_rows(),
+            batch_size_bytes
+        );
+        writer.write(&last_batch)?;
+    }
+
+    writer.finish()?;
+    Ok(())
+}
+
 #[utoipa::path(
     post,
     path = "/connections/query",
@@ -149,7 +313,7 @@ async fn query_connection_ipc(
     claims: ConnectionClaims,
     Json(payload): Json<QueryRequest>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
-    let conn_id = claims.0.sub;
+    let conn_id = claims.connection_id;
     let conn_entry = state.connection_registry.get(&conn_id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", conn_id),
@@ -175,14 +339,9 @@ async fn query_connection_ipc(
 
             let mut channel_writer = ChannelWriter { sender: tx.clone() };
             let schema = reader.schema();
-            let mut writer =
-                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+            let writer = arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
 
-            for batch in reader {
-                let b = batch?;
-                writer.write(&b)?;
-            }
-            writer.finish()?;
+            write_coalesced(writer, reader)?;
             Ok(())
         })();
 
@@ -210,6 +369,7 @@ async fn query_connection_ipc(
         health_check,
         list_drivers,
         list_databases,
+        get_database,
         create_database,
         delete_database,
         create_connection,
@@ -224,11 +384,14 @@ async fn query_connection_ipc(
         execute_statement_update,
         execute_statement_query,
         bind_statement,
+        set_connection_option,
+        set_statement_option,
         get_connection_info,
         get_connection_objects,
         get_connection_table_types,
         get_connection_table_schema,
-        query_connection_ipc
+        query_connection_ipc,
+        query_database_ipc
     ),
     components(schemas(
         CreateDatabaseRequest,
@@ -238,8 +401,8 @@ async fn query_connection_ipc(
         CreateStatementResponse,
         SetSqlQueryRequest,
         QueryRequest,
-        crate::database_manager::DatabaseInfo,
-        crate::auth::Claims,
+        SetOptionRequest,
+        DatabaseInfo,
         crate::auth::Scope
     )),
     modifiers(&SecurityAddon),
@@ -315,13 +478,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/health", get(health_check))
         .route("/drivers", get(list_drivers))
         .route("/databases", get(list_databases).post(create_database))
-        .route("/databases/:id", delete(delete_database))
+        .route("/databases/:id", get(get_database).delete(delete_database))
         .route("/databases/:id/connections", post(create_connection))
+        .route("/databases/:id/query", post(query_database_ipc))
         .route("/connections", delete(delete_connection))
         .route("/connections/commit", post(commit_connection))
         .route("/connections/rollback", post(rollback_connection))
         .route("/connections/cancel", post(cancel_connection))
         .route("/connections/query", post(query_connection_ipc))
+        .route("/connections/options", post(set_connection_option))
         .route("/connections/info", get(get_connection_info))
         .route("/connections/objects", get(get_connection_objects))
         .route("/connections/table-types", get(get_connection_table_types))
@@ -333,10 +498,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/statements", delete(delete_statement))
         .route("/statements/sql", post(set_statement_sql_query))
         .route("/statements/bind", post(bind_statement))
+        .route("/statements/options", post(set_statement_option))
         .route("/statements/prepare", post(prepare_statement))
         .route("/statements/execute", post(execute_statement_query))
         .route("/statements/execute_update", post(execute_statement_update))
-        .layer(Extension(state));
+        .layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
+                .layer(CorsLayer::permissive())
+                .layer(Extension(state)),
+        );
 
     // Run it
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
@@ -345,6 +516,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+#[utoipa::path(
+    get,
+    path = "/databases/{id}",
+    params((
+        "id" = String,
+        Path,
+        description = "Database ID to retrieve"
+    )),
+    responses((
+        status = 200,
+        description = "Database information",
+        body = DatabaseInfo
+    ), (status = 404, description = "Database not found"))
+)]
+async fn get_database(
+    Extension(state): Extension<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<DatabaseInfo>, (StatusCode, String)> {
+    if let Some(db_entry) = state.database_registry.get(&id).await {
+        Ok(Json(DatabaseInfo {
+            id: db_entry.id.clone(),
+            driver_name: db_entry.driver_name.clone(),
+            name: db_entry.name.clone(),
+        }))
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            format!("Database '{}' not found", id),
+        ))
+    }
 }
 
 #[utoipa::path(
@@ -382,9 +585,7 @@ async fn list_drivers(Extension(state): Extension<Arc<AppState>>) -> Json<Vec<St
         body = Vec<DatabaseInfo>
     ))
 )]
-async fn list_databases(
-    Extension(state): Extension<Arc<AppState>>,
-) -> Json<Vec<crate::database_manager::DatabaseInfo>> {
+async fn list_databases(Extension(state): Extension<Arc<AppState>>) -> Json<Vec<DatabaseInfo>> {
     let dbs = state.database_registry.list().await;
     Json(dbs)
 }
@@ -439,7 +640,7 @@ async fn create_database(
     // 4. Register
     let id = state
         .database_registry
-        .register(payload.driver.clone(), database)
+        .register(payload.driver.clone(), payload.name, database)
         .await;
 
     tracing::info!("Created database '{}' with driver '{}'", id, payload.driver);
@@ -533,12 +734,13 @@ async fn create_connection(
     let conn_id = state.connection_registry.register(connection).await;
 
     // 5. Generate Token
-    let token = sign_token(conn_id.clone(), Scope::Connection).map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to generate connection token".to_string(),
-        )
-    })?;
+    let token =
+        sign_token(conn_id.clone(), Scope::Connection, Some(db_id.clone())).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to generate connection token".to_string(),
+            )
+        })?;
 
     tracing::info!(
         "Acquired connection '{}' from database '{}'",
@@ -557,14 +759,14 @@ async fn create_connection(
     ),
     responses((
         status = 204,
-        description = "Connection released"
+        description = "Connection deleted using ID from bearer token"
     ), (status = 404, description = "Connection not found"))
 )]
 async fn delete_connection(
     Extension(state): Extension<Arc<AppState>>,
     claims: ConnectionClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let id = claims.0.sub;
+    let id = claims.connection_id;
     if state.connection_registry.remove(&id).await.is_some() {
         tracing::info!("Released connection '{}'", id);
         Ok(StatusCode::NO_CONTENT)
@@ -577,7 +779,7 @@ async fn delete_connection(
 }
 
 async fn handle_connection_action(
-    state: Extension<Arc<AppState>>,
+    state: Arc<AppState>,
     conn_id: String,
     action: impl FnOnce(&mut ManagedConnection) -> Result<(), adbc_core::error::Error>,
     action_name: &str,
@@ -626,12 +828,12 @@ async fn handle_connection_action(
     ), (status = 404, description = "Connection not found"), (status = 500, description = "Failed to commit transaction"))
 )]
 async fn commit_connection(
-    state: Extension<Arc<AppState>>,
+    Extension(state): Extension<Arc<AppState>>,
     claims: ConnectionClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_connection_action(
         state,
-        claims.0.sub,
+        claims.connection_id,
         |conn| conn.commit(),
         "commit transaction",
     )
@@ -650,12 +852,12 @@ async fn commit_connection(
     ), (status = 404, description = "Connection not found"), (status = 500, description = "Failed to rollback transaction"))
 )]
 async fn rollback_connection(
-    state: Extension<Arc<AppState>>,
+    Extension(state): Extension<Arc<AppState>>,
     claims: ConnectionClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_connection_action(
         state,
-        claims.0.sub,
+        claims.connection_id,
         |conn| conn.rollback(),
         "rollback transaction",
     )
@@ -674,12 +876,12 @@ async fn rollback_connection(
     ), (status = 404, description = "Connection not found"), (status = 500, description = "Failed to cancel operation"))
 )]
 async fn cancel_connection(
-    state: Extension<Arc<AppState>>,
+    Extension(state): Extension<Arc<AppState>>,
     claims: ConnectionClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_connection_action(
         state,
-        claims.0.sub,
+        claims.connection_id,
         |conn| conn.cancel(),
         "cancel operation",
     )
@@ -701,7 +903,7 @@ async fn create_statement(
     Extension(state): Extension<Arc<AppState>>,
     claims: ConnectionClaims,
 ) -> Result<Json<CreateStatementResponse>, (StatusCode, String)> {
-    let conn_id = claims.0.sub;
+    let conn_id = claims.connection_id;
     let conn_entry = state.connection_registry.get(&conn_id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", conn_id),
@@ -718,12 +920,13 @@ async fn create_statement(
     })?;
 
     let stmt_id = state.statement_registry.register(statement).await;
-    let token = sign_token(stmt_id.clone(), Scope::Statement).map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to generate statement token".to_string(),
-        )
-    })?;
+    let token =
+        sign_token(stmt_id.clone(), Scope::Statement, Some(conn_id.clone())).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to generate statement token".to_string(),
+            )
+        })?;
 
     tracing::info!(
         "Created statement '{}' from connection '{}'",
@@ -748,7 +951,7 @@ async fn delete_statement(
     Extension(state): Extension<Arc<AppState>>,
     claims: StatementClaims,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let id = claims.0.sub;
+    let id = claims.statement_id;
     if state.statement_registry.remove(&id).await.is_some() {
         tracing::info!("Released statement '{}'", id);
         Ok(StatusCode::NO_CONTENT)
@@ -816,7 +1019,7 @@ async fn set_statement_sql_query(
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_statement_action(
         state,
-        claims.0.sub,
+        claims.statement_id,
         move |stmt| stmt.set_sql_query(&payload.query),
         "set SQL query",
     )
@@ -840,7 +1043,7 @@ async fn prepare_statement(
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_statement_action(
         state,
-        claims.0.sub,
+        claims.statement_id,
         |stmt| stmt.prepare(),
         "prepare statement",
     )
@@ -866,7 +1069,7 @@ async fn bind_statement(
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_statement_action(
         state,
-        claims.0.sub,
+        claims.statement_id,
         move |stmt| {
             let cursor = std::io::Cursor::new(body);
             let reader = arrow::ipc::reader::StreamReader::try_new(cursor, None).map_err(|e| {
@@ -917,7 +1120,7 @@ async fn execute_statement_update(
 ) -> Result<StatusCode, (StatusCode, String)> {
     handle_statement_action(
         state,
-        claims.0.sub,
+        claims.statement_id,
         |stmt| stmt.execute_update().map(|_| ()),
         "execute update",
     )
@@ -941,7 +1144,7 @@ async fn execute_statement_query(
     Extension(state): Extension<Arc<AppState>>,
     claims: StatementClaims,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
-    let stmt_id = claims.0.sub;
+    let stmt_id = claims.statement_id;
     let stmt_entry = state.statement_registry.get(&stmt_id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Statement '{}' not found", stmt_id),
@@ -962,14 +1165,9 @@ async fn execute_statement_query(
 
             let mut channel_writer = ChannelWriter { sender: tx.clone() };
             let schema = reader.schema();
-            let mut writer =
-                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+            let writer = arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
 
-            for batch in reader {
-                let b = batch?;
-                writer.write(&b)?;
-            }
-            writer.finish()?;
+            write_coalesced(writer, reader)?;
             Ok(())
         })();
 
@@ -1008,7 +1206,7 @@ async fn get_connection_info(
     Extension(state): Extension<Arc<AppState>>,
     claims: ConnectionClaims,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
-    let id = claims.0.sub;
+    let id = claims.connection_id;
     let conn_entry = state.connection_registry.get(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", id),
@@ -1027,14 +1225,9 @@ async fn get_connection_info(
 
             let mut channel_writer = ChannelWriter { sender: tx.clone() };
             let schema = reader.schema();
-            let mut writer =
-                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+            let writer = arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
 
-            for batch in reader {
-                let b = batch?;
-                writer.write(&b)?;
-            }
-            writer.finish()?;
+            write_coalesced(writer, reader)?;
             Ok(())
         })();
 
@@ -1077,7 +1270,7 @@ async fn get_connection_objects(
     claims: ConnectionClaims,
     Query(params): Query<GetObjectsParams>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
-    let id = claims.0.sub;
+    let id = claims.connection_id;
     let conn_entry = state.connection_registry.get(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", id),
@@ -1119,14 +1312,9 @@ async fn get_connection_objects(
 
             let mut channel_writer = ChannelWriter { sender: tx.clone() };
             let schema = reader.schema();
-            let mut writer =
-                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+            let writer = arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
 
-            for batch in reader {
-                let b = batch?;
-                writer.write(&b)?;
-            }
-            writer.finish()?;
+            write_coalesced(writer, reader)?;
             Ok(())
         })();
 
@@ -1165,7 +1353,7 @@ async fn get_connection_table_types(
     Extension(state): Extension<Arc<AppState>>,
     claims: ConnectionClaims,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
-    let id = claims.0.sub;
+    let id = claims.connection_id;
     let conn_entry = state.connection_registry.get(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", id),
@@ -1184,14 +1372,9 @@ async fn get_connection_table_types(
 
             let mut channel_writer = ChannelWriter { sender: tx.clone() };
             let schema = reader.schema();
-            let mut writer =
-                arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+            let writer = arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
 
-            for batch in reader {
-                let b = batch?;
-                writer.write(&b)?;
-            }
-            writer.finish()?;
+            write_coalesced(writer, reader)?;
             Ok(())
         })();
 
@@ -1236,7 +1419,7 @@ async fn get_connection_table_schema(
     Path(table_name): Path<String>,
     Query(params): Query<GetTableSchemaParams>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
-    let id = claims.0.sub;
+    let id = claims.connection_id;
     let conn_entry = state.connection_registry.get(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("Connection '{}' not found", id),
@@ -1262,6 +1445,80 @@ async fn get_connection_table_schema(
             let mut writer =
                 arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
             writer.finish()?;
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            tracing::error!("Streaming error: {}", e);
+            let _ = tx.blocking_send(Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )));
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let body = axum::body::Body::from_stream(stream);
+
+    Ok(axum::response::Response::builder()
+        .header("Content-Type", "application/vnd.apache.arrow.stream")
+        .body(body)
+        .unwrap())
+}
+
+#[utoipa::path(
+    post,
+    path = "/databases/{id}/query",
+    security(
+        ("bearer_auth" = [])
+    ),
+    params((
+        "id" = String,
+        Path,
+        description = "Database ID to query"
+    )),
+    request_body = QueryRequest,
+    responses((
+        status = 200,
+        description = "Arrow IPC Stream",
+        content_type = "application/vnd.apache.arrow.stream",
+        body = Vec<u8>
+    ), (status = 404, description = "Database not found"), (status = 500, description = "Failed to execute query"))
+)]
+async fn query_database_ipc(
+    Extension(state): Extension<Arc<AppState>>,
+    Path(db_id): Path<String>,
+    Json(payload): Json<QueryRequest>,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let db_entry = state.database_registry.get(&db_id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Database '{}' not found", db_id),
+    ))?;
+
+    let mut connection = db_entry.acquire_connection().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to acquire connection: {}", e),
+        )
+    })?;
+
+    let query = payload.query.clone();
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(2);
+
+    tokio::task::spawn_blocking(move || {
+        let managed_conn = &mut *connection;
+
+        let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            let mut statement = managed_conn.new_statement()?;
+            statement.set_sql_query(&query)?;
+            let reader = statement.execute()?;
+
+            let mut channel_writer = ChannelWriter { sender: tx.clone() };
+            let schema = reader.schema();
+            let writer = arrow::ipc::writer::StreamWriter::try_new(&mut channel_writer, &schema)?;
+
+            write_coalesced(writer, reader)?;
             Ok(())
         })();
 

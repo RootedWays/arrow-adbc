@@ -41,6 +41,109 @@ async fn test_full_lifecycle_sqlite() {
 }
 
 #[tokio::test]
+async fn test_database_metadata() {
+    let app = app().await;
+
+    // 1. Create Database with Name
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/databases")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    r#"{ "driver": "sqlite", "options": { "uri": ":memory:" }, "name": "my_custom_db" }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let db_id = serde_json::from_slice::<Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // 2. Get Database Info
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&format!("/databases/{}", db_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let db_info: Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(db_info["id"], db_id);
+    assert_eq!(db_info["driver_name"], "sqlite");
+    assert_eq!(db_info["name"], "my_custom_db");
+
+    // 3. Create Database WITHOUT Name
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/databases")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    r#"{ "driver": "sqlite", "options": { "uri": ":memory:" } }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let db_id_no_name = serde_json::from_slice::<Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // 4. Get Database Info (No Name)
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&format!("/databases/{}", db_id_no_name))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let db_info_no_name: Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(db_info_no_name["id"], db_id_no_name);
+    // Name field should be absent or null depending on serialization config.
+    // We used #[serde(skip_serializing_if = "Option::is_none")] so it should be absent.
+    assert!(db_info_no_name.get("name").is_none());
+
+    delete_database(&app, &db_id).await;
+    delete_database(&app, &db_id_no_name).await;
+}
+
+#[tokio::test]
 async fn test_connection_pooling_limits() {
     let app = app().await;
     let db_id = create_test_db(&app).await;
@@ -152,6 +255,36 @@ async fn test_connection_actions() {
         response.status() == StatusCode::NO_CONTENT
             || response.status() == StatusCode::NOT_IMPLEMENTED
     );
+
+    delete_connection(&app, &conn_token).await;
+    delete_database(&app, &db_id).await;
+}
+
+#[tokio::test]
+async fn test_set_options() {
+    let app = app().await;
+    let db_id = create_test_db(&app).await;
+    let conn_token = create_test_conn(&app, &db_id).await;
+
+    // Set Connection Option
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/connections/options")
+                .header("Authorization", format!("Bearer {}", conn_token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    r#"{ "key": "adbc.connection.autocommit", "value": "false" }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // TODO: Test Statement Options if there's a reliable one to test with SQLite
 
     delete_connection(&app, &conn_token).await;
     delete_database(&app, &db_id).await;

@@ -74,6 +74,7 @@ pub type AdbcConnectionObject = Object<AdbcConnectionManager>;
 pub struct DatabaseEntry {
     pub id: String,
     pub driver_name: String,
+    pub name: Option<String>,
     // Store protected database
     pub _database: Arc<Mutex<ManagedDatabase>>,
     pub pool: AdbcConnectionPool,
@@ -105,7 +106,12 @@ impl DatabaseRegistry {
         }
     }
 
-    pub async fn register(&self, driver_name: String, database: ManagedDatabase) -> String {
+    pub async fn register(
+        &self,
+        driver_name: String,
+        name: Option<String>,
+        database: ManagedDatabase,
+    ) -> String {
         let id = Uuid::new_v4().to_string();
 
         // Wrap database in Mutex for Manager
@@ -120,6 +126,7 @@ impl DatabaseRegistry {
         let entry = DatabaseEntry {
             id: id.clone(),
             driver_name,
+            name,
             _database: db_arc,
             pool,
         };
@@ -146,6 +153,7 @@ impl DatabaseRegistry {
             .map(|entry| DatabaseInfo {
                 id: entry.id.clone(),
                 driver_name: entry.driver_name.clone(),
+                name: entry.name.clone(),
             })
             .collect()
     }
@@ -155,4 +163,6 @@ impl DatabaseRegistry {
 pub struct DatabaseInfo {
     pub id: String,
     pub driver_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }

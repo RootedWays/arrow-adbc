@@ -14,9 +14,10 @@ use crate::{
     delete_connection as delete_connection_handler, delete_database as delete_database_handler,
     delete_statement as delete_statement_handler, driver_manager::DriverRegistry,
     execute_statement_query, execute_statement_update, get_connection_info, get_connection_objects,
-    get_connection_table_schema, get_connection_table_types, health_check, list_databases,
-    list_drivers, prepare_statement, query_connection_ipc, rollback_connection,
-    set_statement_sql_query, statement_manager::StatementRegistry, AppState,
+    get_connection_table_schema, get_connection_table_types, get_database, health_check,
+    list_databases, list_drivers, prepare_statement, query_connection_ipc, query_database_ipc,
+    rollback_connection, set_connection_option, set_statement_option, set_statement_sql_query,
+    statement_manager::StatementRegistry, AppState,
 };
 
 pub async fn app() -> Router {
@@ -48,13 +49,18 @@ pub async fn app() -> Router {
         .route("/health", get(health_check))
         .route("/drivers", get(list_drivers))
         .route("/databases", get(list_databases).post(create_database))
-        .route("/databases/:id", delete(delete_database_handler))
+        .route(
+            "/databases/:id",
+            get(get_database).delete(delete_database_handler),
+        )
         .route("/databases/:id/connections", post(create_connection))
+        .route("/databases/:id/query", post(query_database_ipc))
         .route("/connections", delete(delete_connection_handler))
         .route("/connections/commit", post(commit_connection))
         .route("/connections/rollback", post(rollback_connection))
         .route("/connections/cancel", post(cancel_connection))
         .route("/connections/query", post(query_connection_ipc))
+        .route("/connections/options", post(set_connection_option))
         .route("/connections/info", get(get_connection_info))
         .route("/connections/objects", get(get_connection_objects))
         .route("/connections/table-types", get(get_connection_table_types))
@@ -66,6 +72,7 @@ pub async fn app() -> Router {
         .route("/statements", delete(delete_statement_handler))
         .route("/statements/sql", post(set_statement_sql_query))
         .route("/statements/bind", post(bind_statement))
+        .route("/statements/options", post(set_statement_option))
         .route("/statements/prepare", post(prepare_statement))
         .route("/statements/execute", post(execute_statement_query))
         .route("/statements/execute_update", post(execute_statement_update))

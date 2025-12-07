@@ -23,9 +23,10 @@ pub enum Scope {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct Claims {
-    pub sub: String,  // The Resource ID (Connection or Statement ID)
-    pub scope: Scope, // What kind of resource is this?
-    pub exp: usize,   // Expiration timestamp
+    pub res_id: String,            // The Resource ID (Connection or Statement ID)
+    pub scope: Scope,              // What kind of resource is this?
+    pub parent_id: Option<String>, // The ID of the parent resource (Database for Connection, Connection for Statement)
+    pub exp: usize,                // Expiration timestamp
 }
 
 #[derive(Debug)]
@@ -58,15 +59,20 @@ impl IntoResponse for AuthError {
     }
 }
 
-pub fn sign_token(id: String, scope: Scope) -> Result<String, AuthError> {
+pub fn sign_token(
+    res_id: String,
+    scope: Scope,
+    parent_id: Option<String>,
+) -> Result<String, AuthError> {
     let expiration = Utc::now()
         .checked_add_signed(Duration::hours(24))
         .expect("valid timestamp")
         .timestamp();
 
     let claims = Claims {
-        sub: id,
+        res_id,
         scope,
+        parent_id,
         exp: expiration as usize,
     };
 
@@ -82,7 +88,10 @@ pub fn sign_token(id: String, scope: Scope) -> Result<String, AuthError> {
 
 // --- Extractors ---
 
-pub struct ConnectionClaims(pub Claims);
+pub struct ConnectionClaims {
+    pub connection_id: String,
+    pub database_id: String,
+}
 
 #[async_trait]
 impl<S> FromRequestParts<S> for ConnectionClaims
@@ -96,11 +105,18 @@ where
         if claims.scope != Scope::Connection {
             return Err(AuthError::WrongScope);
         }
-        Ok(ConnectionClaims(claims))
+        let database_id = claims.parent_id.ok_or(AuthError::MissingCredentials)?;
+        Ok(ConnectionClaims {
+            connection_id: claims.res_id,
+            database_id,
+        })
     }
 }
 
-pub struct StatementClaims(pub Claims);
+pub struct StatementClaims {
+    pub statement_id: String,
+    pub connection_id: String,
+}
 
 #[async_trait]
 impl<S> FromRequestParts<S> for StatementClaims
@@ -114,7 +130,11 @@ where
         if claims.scope != Scope::Statement {
             return Err(AuthError::WrongScope);
         }
-        Ok(StatementClaims(claims))
+        let connection_id = claims.parent_id.ok_or(AuthError::MissingCredentials)?;
+        Ok(StatementClaims {
+            statement_id: claims.res_id,
+            connection_id,
+        })
     }
 }
 
