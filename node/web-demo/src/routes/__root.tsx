@@ -28,25 +28,26 @@ function RootComponent() {
   useEffect(() => {
     // Check initial preference
     if (
-      localStorage.theme === 'dark' ||
-      (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
+      localStorage.theme === "dark" ||
+      (!("theme" in localStorage) &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches)
     ) {
-      setTheme('dark');
-      document.documentElement.classList.add('dark');
+      setTheme("dark");
+      document.documentElement.classList.add("dark");
     } else {
-      setTheme('light');
-      document.documentElement.classList.remove('dark');
+      setTheme("light");
+      document.documentElement.classList.remove("dark");
     }
   }, []);
 
   const toggleTheme = (newTheme: "light" | "dark") => {
     setTheme(newTheme);
-    if (newTheme === 'dark') {
-      document.documentElement.classList.add('dark');
-      localStorage.theme = 'dark';
+    if (newTheme === "dark") {
+      document.documentElement.classList.add("dark");
+      localStorage.theme = "dark";
     } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.theme = 'light';
+      document.documentElement.classList.remove("dark");
+      localStorage.theme = "light";
     }
   };
 
@@ -85,14 +86,22 @@ function RootComponent() {
           <div className="p-4 border-t border-sidebar-border">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="w-full justify-start px-2 h-14 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start px-2 h-14 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                >
                   <Avatar className="h-8 w-8 mr-2">
-                    <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
+                    <AvatarImage
+                      src="https://github.com/shadcn.png"
+                      alt="@shadcn"
+                    />
                     <AvatarFallback>QN</AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col items-start text-left">
-                     <span className="text-sm font-medium">Kent</span>
-                     <span className="text-xs text-muted-foreground">kent@quiver.io</span>
+                    <span className="text-sm font-medium">Kent</span>
+                    <span className="text-xs text-muted-foreground">
+                      kent@quiver.io
+                    </span>
                   </div>
                 </Button>
               </DropdownMenuTrigger>
@@ -107,7 +116,7 @@ function RootComponent() {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                   <DropdownMenuSub>
+                  <DropdownMenuSub>
                     <DropdownMenuSubTrigger>
                       <Sun className="mr-2 h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
                       <Moon className="absolute mr-2 h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />

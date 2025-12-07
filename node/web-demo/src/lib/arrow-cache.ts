@@ -1,5 +1,5 @@
-import { createStore } from 'zustand/vanilla';
-import { Table, RecordBatch } from 'apache-arrow';
+import { createStore } from "zustand/vanilla";
+import { Table, RecordBatch } from "apache-arrow";
 
 // CONFIGURATION
 const FLUSH_THRESHOLD_ROWS = 65000; // Optimal size for DuckDB/Vectorization
@@ -46,8 +46,6 @@ export const arrowCache = createStore<CacheState>((set, get) => ({
 
   streamBatch: (id, batch) => {
     set((state) => {
-      console.time(`streamBatch total for ${id}`);
-
       const entry = state.entries.get(id);
 
       const nextMap = new Map(state.entries);
@@ -61,20 +59,16 @@ export const arrowCache = createStore<CacheState>((set, get) => ({
           totalRows: batch.numRows,
           lastUpdated: Date.now(),
         });
-        console.timeEnd(`streamBatch total for ${id}`);
         return { entries: nextMap };
       }
 
       const newStaging = [...entry.stagingBatches, batch];
 
-      console.time(`streamBatch stagingRowCount for ${id}`);
       // Calculate total pending rows in staging
       const stagingRowCount = newStaging.reduce((acc, b) => acc + b.numRows, 0);
-      console.timeEnd(`streamBatch stagingRowCount for ${id}`);
 
       // DECISION: Buffer or Flush?
       if (stagingRowCount >= FLUSH_THRESHOLD_ROWS) {
-        console.time(`streamBatch FLUSH for ${id}`);
         // FLUSH: Merge batches into a new Table structure efficiently
         // We access the underlying batches of the committed table
         const allBatches = [...entry.committedTable.batches, ...newStaging];
@@ -85,22 +79,18 @@ export const arrowCache = createStore<CacheState>((set, get) => ({
           committedTable: newCommitted,
           stagingBatches: [], // Clear buffer
           totalRows: newCommitted.numRows,
-          lastUpdated: Date.now()
+          lastUpdated: Date.now(),
         });
-        console.timeEnd(`streamBatch FLUSH for ${id}`);
       } else {
-        console.time(`streamBatch BUFFER for ${id}`);
         // BUFFER: Just add to staging array (Very cheap)
         nextMap.set(id, {
           ...entry,
           stagingBatches: newStaging,
           totalRows: entry.committedTable.numRows + stagingRowCount,
-          lastUpdated: Date.now()
+          lastUpdated: Date.now(),
         });
-        console.timeEnd(`streamBatch BUFFER for ${id}`);
       }
 
-      console.timeEnd(`streamBatch total for ${id}`);
       return { entries: nextMap };
     });
   },
@@ -111,7 +101,10 @@ export const arrowCache = createStore<CacheState>((set, get) => ({
       if (!entry || entry.stagingBatches.length === 0) return state;
 
       const nextMap = new Map(state.entries);
-      const allBatches = [...entry.committedTable.batches, ...entry.stagingBatches];
+      const allBatches = [
+        ...entry.committedTable.batches,
+        ...entry.stagingBatches,
+      ];
       const newCommitted = new Table(allBatches);
 
       nextMap.set(id, {
@@ -119,7 +112,7 @@ export const arrowCache = createStore<CacheState>((set, get) => ({
         committedTable: newCommitted,
         stagingBatches: [],
         totalRows: newCommitted.numRows,
-        lastUpdated: Date.now()
+        lastUpdated: Date.now(),
       });
       return { entries: nextMap };
     });
@@ -129,8 +122,11 @@ export const arrowCache = createStore<CacheState>((set, get) => ({
     const entry = get().entries.get(id);
     if (!entry) return null;
     // Return a lightweight view over all data (committed + staging)
-    return new Table([...entry.committedTable.batches, ...entry.stagingBatches]);
+    return new Table([
+      ...entry.committedTable.batches,
+      ...entry.stagingBatches,
+    ]);
   },
 
-  getEntry: (id) => get().entries.get(id)
+  getEntry: (id) => get().entries.get(id),
 }));

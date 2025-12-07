@@ -4,13 +4,13 @@
 
 @layer base {
   :root {
-    --background: oklch(0.9970 0 0);
+    --background: oklch(0.997 0 0);
     --foreground: oklch(0.2069 0.0098 285.5081);
 
-    --card: oklch(1.0000 0 0);
+    --card: oklch(1 0 0);
     --card-foreground: oklch(0.2069 0.0098 285.5081);
 
-    --popover: oklch(1.0000 0 0);
+    --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.2069 0.0098 285.5081);
 
     --primary: oklch(0.4676 0 0);
@@ -60,11 +60,11 @@
 
     --sidebar-ring: oklch(0.6898 0.0388 261.2469);
 
-    --font-sans: 'Inter', sans-serif;
+    --font-sans: "Inter", sans-serif;
 
-    --font-serif: 'Lora', serif;
+    --font-serif: "Lora", serif;
 
-    --font-mono: 'Fira Code', monospace;
+    --font-mono: "Fira Code", monospace;
 
     --shadow-color: #000000;
 
@@ -82,21 +82,26 @@
 
     --spacing: 0.25rem;
 
-    --shadow-2xs: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00);
+    --shadow-2xs: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0);
 
-    --shadow-xs: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00);
+    --shadow-xs: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0);
 
-    --shadow-sm: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 1px 2px -1px hsl(0 0% 0% / 0.00);
+    --shadow-sm:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 1px 2px -1px hsl(0 0% 0% / 0);
 
-    --shadow: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 1px 2px -1px hsl(0 0% 0% / 0.00);
+    --shadow:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 1px 2px -1px hsl(0 0% 0% / 0);
 
-    --shadow-md: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 2px 4px -1px hsl(0 0% 0% / 0.00);
+    --shadow-md:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 2px 4px -1px hsl(0 0% 0% / 0);
 
-    --shadow-lg: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 4px 6px -1px hsl(0 0% 0% / 0.00);
+    --shadow-lg:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 4px 6px -1px hsl(0 0% 0% / 0);
 
-    --shadow-xl: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 8px 10px -1px hsl(0 0% 0% / 0.00);
+    --shadow-xl:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 8px 10px -1px hsl(0 0% 0% / 0);
 
-    --shadow-2xl: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00);
+    --shadow-2xl: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0);
 
     --tracking-normal: 0em;
   }
@@ -143,9 +148,9 @@
     --sidebar-accent-foreground: oklch(0.9851 0 0);
     --sidebar-border: oklch(0.3485 0 0);
     --sidebar-ring: oklch(0.6898 0.0388 261.2469);
-    --font-sans: 'Inter', sans-serif;
-    --font-serif: 'Lora', serif;
-    --font-mono: 'Fira Code', monospace;
+    --font-sans: "Inter", sans-serif;
+    --font-serif: "Lora", serif;
+    --font-mono: "Fira Code", monospace;
     --shadow-color: #000000;
     --shadow-opacity: 0;
     --shadow-blur: 0rem;
@@ -154,19 +159,24 @@
     --shadow-offset-y: 0rem;
     --letter-spacing: 0em;
     --spacing: 0.25rem;
-    --shadow-2xs: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00);
-    --shadow-xs: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00);
-    --shadow-sm: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 1px 2px -1px hsl(0 0% 0% / 0.00);
-    --shadow: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 1px 2px -1px hsl(0 0% 0% / 0.00);
-    --shadow-md: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 2px 4px -1px hsl(0 0% 0% / 0.00);
-    --shadow-lg: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 4px 6px -1px hsl(0 0% 0% / 0.00);
-    --shadow-xl: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00), 0rem 8px 10px -1px hsl(0 0% 0% / 0.00);
-    --shadow-2xl: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0.00);
+    --shadow-2xs: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0);
+    --shadow-xs: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0);
+    --shadow-sm:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 1px 2px -1px hsl(0 0% 0% / 0);
+    --shadow:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 1px 2px -1px hsl(0 0% 0% / 0);
+    --shadow-md:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 2px 4px -1px hsl(0 0% 0% / 0);
+    --shadow-lg:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 4px 6px -1px hsl(0 0% 0% / 0);
+    --shadow-xl:
+      0rem 0rem 0rem 0rem hsl(0 0% 0% / 0), 0rem 8px 10px -1px hsl(0 0% 0% / 0);
+    --shadow-2xl: 0rem 0rem 0rem 0rem hsl(0 0% 0% / 0);
   }
   .theme {
-    --font-sans: 'Inter', sans-serif;
-    --font-mono: 'Fira Code', monospace;
-    --font-serif: 'Lora', serif;
+    --font-sans: "Inter", sans-serif;
+    --font-mono: "Fira Code", monospace;
+    --font-serif: "Lora", serif;
     --radius: 0.25rem;
     --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
     --tracking-tight: calc(var(--tracking-normal) - 0.025em);

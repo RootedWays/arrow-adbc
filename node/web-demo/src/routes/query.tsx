@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Table as ArrowTable } from "apache-arrow";
 import { Play, Loader2, Database } from "lucide-react";
 import { z } from "zod";
@@ -25,6 +25,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { useAppStore } from "@/lib/store";
 import { useListDatabases } from "@/api/hooks/useListDatabases";
+import { ArrowGridView } from "@/components/arrow-grid-view";
 
 const searchSchema = z.object({
   dbId: z.string().optional(),
@@ -35,18 +36,68 @@ export const Route = createFileRoute("/query")({
   component: QueryEditor,
 });
 
+function QueryResultsSection() {
+  const results = useAppStore((state) => state.queryResults);
+  const schema = useAppStore((state) => state.querySchema);
+  const loading = useAppStore((state) => state.isQueryRunning);
+  const error = useAppStore((state) => state.queryError);
+
+  const columns = useMemo(() => {
+    if (!schema) return undefined;
+    return schema.fields.map((field) => ({
+      accessorKey: field.name,
+      header: field.name,
+      cell: (info: any) => String(info.getValue()),
+    }));
+  }, [schema]);
+
+  return (
+    <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <CardHeader className="pb-3 border-b">
+        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+          Results
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex-1 p-0 overflow-auto relative">
+        {error && (
+          <div className="absolute inset-0 p-4 bg-destructive/5 text-destructive text-sm font-mono whitespace-pre-wrap">
+            {error}
+          </div>
+        )}
+
+        {!error && !results && !loading && (
+          <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+            Execute a query to view results
+          </div>
+        )}
+
+        {results && (
+          <div className="h-full w-full overflow-hidden">
+            <ArrowGridView table={results} columns={columns} />
+          </div>
+        )}
+      </CardContent>
+      {results && (
+        <div className="p-2 border-t bg-muted/20 text-xs text-muted-foreground text-right">
+          {results.numRows.toLocaleString()} rows
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function QueryEditor() {
   const { dbId } = Route.useSearch();
   const navigate = Route.useNavigate();
-  
+
   const getConnection = useAppStore((state) => state.getConnection);
   const establishConnection = useAppStore((state) => state.establishConnection);
-  const activeConn = useAppStore((state) => dbId ? state.connections[dbId] : undefined);
-  
+  const activeConn = useAppStore((state) =>
+    dbId ? state.connections[dbId] : undefined,
+  );
+
   const runQuery = useAppStore((state) => state.runQuery);
-  const results = useAppStore((state) => state.queryResults);
   const loading = useAppStore((state) => state.isQueryRunning);
-  const error = useAppStore((state) => state.queryError);
 
   const { data: databases } = useListDatabases();
 
@@ -60,18 +111,43 @@ function QueryEditor() {
           databaseOptions: { id: dbId },
         }).catch((err) => {
           console.error("Failed to auto-connect:", err);
-          toast.error("Connection Failed", { description: "Could not connect to selected database." });
+          toast.error("Connection Failed", {
+            description: "Could not connect to selected database.",
+          });
         });
       }
     }
   }, [dbId, activeConn, databases, establishConnection]);
 
   const [query, setQuery] = useState(`SELECT * FROM sqlite_master`);
+  const initializedDbRef = useRef<string | null>(null);
 
-  // Handle DB change: maybe clear results? 
+  useEffect(() => {
+    if (databases && dbId && initializedDbRef.current !== dbId) {
+      const db = databases.find((d) => d.id === dbId);
+      if (db) {
+        initializedDbRef.current = dbId;
+        if (db.driver_name.toLowerCase() === "sqlite") {
+          setQuery(`WITH RECURSIVE generate_series(value) AS (
+  SELECT 1
+  UNION ALL
+  SELECT value + 1 FROM generate_series WHERE value < 1000000
+)
+SELECT
+  value AS id,
+  printf('text_%d', value) AS text_col,
+  CAST(RANDOM() AS REAL) / 9223372036854775807 AS random_val,
+  (value % 2 = 0) AS is_even
+FROM generate_series;`);
+        }
+      }
+    }
+  }, [dbId, databases]);
+
+  // Handle DB change: maybe clear results?
   // Store logic handles clearing on new runQuery, but switching DB might want to clear view.
   useEffect(() => {
-     // Optional: Clear results in store if needed, but for now we just switch context.
+    // Optional: Clear results in store if needed, but for now we just switch context.
   }, [dbId]);
 
   const handleDbChange = (newDbId: string) => {
@@ -80,8 +156,8 @@ function QueryEditor() {
 
   const handleRunQuery = () => {
     if (!dbId) {
-        toast.error("No Database Selected");
-        return;
+      toast.error("No Database Selected");
+      return;
     }
     runQuery(dbId, query);
   };
@@ -123,7 +199,8 @@ function QueryEditor() {
             <Database className="h-10 w-10 text-muted-foreground mb-4" />
             <h3 className="mt-4 text-lg font-semibold">No Database Selected</h3>
             <p className="mb-4 mt-2 text-sm text-muted-foreground">
-              Select an active database connection from the dropdown above to start querying.
+              Select an active database connection from the dropdown above to
+              start querying.
             </p>
           </div>
         </div>
@@ -157,58 +234,7 @@ function QueryEditor() {
             </CardContent>
           </Card>
 
-          <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <CardHeader className="pb-3 border-b">
-              <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                Results
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 p-0 overflow-auto relative">
-              {error && (
-                <div className="absolute inset-0 p-4 bg-destructive/5 text-destructive text-sm font-mono whitespace-pre-wrap">
-                  {error}
-                </div>
-              )}
-
-              {!error && !results && !loading && (
-                <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-                  Execute a query to view results
-                </div>
-              )}
-
-              {results && (
-                <div className="h-full w-full overflow-auto">
-                  <Table>
-                    <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
-                      <TableRow>
-                        {results.schema.fields.map((field) => (
-                          <TableHead key={field.name} className="whitespace-nowrap">
-                            {field.name}
-                          </TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {Array.from(results.slice(0, 100)).map((row, i) => (
-                        <TableRow key={i}>
-                          {results.schema.fields.map((field) => (
-                            <TableCell key={field.name} className="whitespace-nowrap font-mono text-xs">
-                              {String(row[field.name])}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-            {results && (
-              <div className="p-2 border-t bg-muted/20 text-xs text-muted-foreground text-right">
-                Showing {Math.min(results.numRows, 100)} of {results.numRows} rows
-              </div>
-            )}
-          </Card>
+          <QueryResultsSection />
         </div>
       )}
     </div>

@@ -1,6 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useListDrivers } from "@/api/hooks/useListDrivers";
-import { useListDatabases, listDatabasesQueryKey } from "@/api/hooks/useListDatabases";
+import {
+  useListDatabases,
+  listDatabasesQueryKey,
+} from "@/api/hooks/useListDatabases";
 import { useCreateDatabase } from "@/api/hooks/useCreateDatabase";
 import { useDeleteDatabase } from "@/api/hooks/useDeleteDatabase";
 import { useQueryClient } from "@tanstack/react-query";
@@ -64,12 +67,13 @@ function Dashboard() {
     isLoading: isLoadingDatabases,
     error: databasesError,
   } = useListDatabases();
-  const { mutateAsync: createDatabaseMutation, isPending: isCreatingDatabase } = useCreateDatabase(); // Use mutateAsync
+  const { mutateAsync: createDatabaseMutation, isPending: isCreatingDatabase } =
+    useCreateDatabase(); // Use mutateAsync
   const { mutate: deleteDatabaseMutation } = useDeleteDatabase();
-  
+
   const establishConnection = useAppStore((state) => state.establishConnection);
   const closeConnection = useAppStore((state) => state.closeConnection);
-  
+
   const queryClient = useQueryClient();
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -125,7 +129,9 @@ function Dashboard() {
         {
           onSuccess: async () => {
             await closeConnection(id); // Close connection in context
-            queryClient.invalidateQueries({ queryKey: listDatabasesQueryKey() }); // Invalidate to refetch list
+            queryClient.invalidateQueries({
+              queryKey: listDatabasesQueryKey(),
+            }); // Invalidate to refetch list
             toast.success("Database Deleted");
           },
           onError: (err: any) => {
@@ -157,7 +163,8 @@ function Dashboard() {
               placeholder=":memory: or /path/to/file.db"
             />
             <p className="text-xs text-muted-foreground">
-              Use <code className="bg-muted px-1 rounded">:memory:</code> for ephemeral in-memory storage.
+              Use <code className="bg-muted px-1 rounded">:memory:</code> for
+              ephemeral in-memory storage.
             </p>
           </div>
         </div>
@@ -254,7 +261,9 @@ function Dashboard() {
             {drivers?.map((driver) => (
               <Card key={driver} className="flex flex-col justify-between">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">{formatDriverName(driver)}</CardTitle>
+                  <CardTitle className="text-lg">
+                    {formatDriverName(driver)}
+                  </CardTitle>
                   <CardDescription>ADBC Driver ({driver})</CardDescription>
                 </CardHeader>
                 <CardContent className="pt-2">
@@ -307,7 +316,8 @@ function Dashboard() {
               <Card key={db.id} className="flex flex-col justify-between">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg truncate" title={db.id}>
-                    {formatDriverName(db.driver_name)} - {db.id.substring(0, 8)}...
+                    {formatDriverName(db.driver_name)} - {db.id.substring(0, 8)}
+                    ...
                   </CardTitle>
                   <CardDescription>Database ID: {db.id}</CardDescription>
                 </CardHeader>
@@ -315,10 +325,7 @@ function Dashboard() {
                   {/* Database-specific info could go here */}
                 </CardContent>
                 <CardFooter className="flex justify-between pt-4">
-                  <Link
-                    to="/query"
-                    search={{ dbId: db.id }}
-                  >
+                  <Link to="/query" search={{ dbId: db.id }}>
                     <Button variant="outline" size="sm">
                       <Play className="mr-2 h-4 w-4" />
                       Query
@@ -349,7 +356,9 @@ function Dashboard() {
           <DialogHeader>
             <DialogTitle>{dialogTitle}</DialogTitle>
             <DialogDescription>
-              Configure your {selectedDriver ? formatDriverName(selectedDriver) : "database"} connection settings.
+              Configure your{" "}
+              {selectedDriver ? formatDriverName(selectedDriver) : "database"}{" "}
+              connection settings.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -386,7 +395,9 @@ function Dashboard() {
               onClick={handleCreateDatabase}
               disabled={!selectedDriver || !dbUri || isCreatingDatabase}
             >
-              {isCreatingDatabase ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isCreatingDatabase ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
               Create
             </Button>
           </DialogFooter>

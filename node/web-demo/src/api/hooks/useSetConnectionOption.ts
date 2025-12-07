@@ -19,8 +19,14 @@ import type {
 import { useMutation } from "@tanstack/react-query";
 
 // Shim for mutationOptions which is missing in v5
-const mutationOptions = <TData = unknown, TError = unknown, TVariables = unknown, TContext = unknown>(options: UseMutationOptions<TData, TError, TVariables, TContext>) => options;
-
+const mutationOptions = <
+  TData = unknown,
+  TError = unknown,
+  TVariables = unknown,
+  TContext = unknown,
+>(
+  options: UseMutationOptions<TData, TError, TVariables, TContext>,
+) => options;
 
 export const setConnectionOptionMutationKey = () =>
   [{ url: "/connections/options" }] as const;
