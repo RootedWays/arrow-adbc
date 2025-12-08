@@ -1089,6 +1089,141 @@ jobs:
           docker compose run python-sdist-test
           popd
 
+  node-binaries:
+    name: "Node.js ${{ matrix.settings.target }}"
+    runs-on: ${{ matrix.settings.host }}
+    needs:
+      - source
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-15-intel
+            target: x86_64-apple-darwin
+            build: npx napi build --platform --release --target x86_64-apple-darwin
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: npx napi build --platform --release --target aarch64-apple-darwin
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            build: npx napi build --platform --release --target x86_64-pc-windows-msvc
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            build: npx napi build --platform --release --target x86_64-unknown-linux-gnu --use-napi-cross
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            build: npx napi build --platform --release --target x86_64-unknown-linux-musl --use-napi-cross
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            build: npx napi build --platform --release --target aarch64-unknown-linux-gnu --use-napi-cross
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            build: npx napi build --platform --release --target aarch64-unknown-linux-musl --use-napi-cross
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: source
+
+      - name: Extract source archive
+        run: |
+          source_archive=$(echo apache-arrow-adbc-*.tar.gz)
+          VERSION=${source_archive#apache-arrow-adbc-}
+          VERSION=${VERSION%.tar.gz}
+
+          tar xf apache-arrow-adbc-${VERSION}.tar.gz
+          mv apache-arrow-adbc-${VERSION} adbc
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: adbc/node/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.settings.target }}
+
+      - name: Install dependencies
+        working-directory: adbc/node
+        run: npm install
+
+      - name: Build
+        working-directory: adbc/node/native
+        run: ${{ matrix.settings.build }}
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: adbc/node/native/*.node
+          if-no-files-found: error
+
+  node-dist:
+    name: "Node.js Package"
+    runs-on: ubuntu-latest
+    needs:
+      - source
+      - node-binaries
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: source
+
+      - name: Extract source archive
+        run: |
+          source_archive=$(echo apache-arrow-adbc-*.tar.gz)
+          VERSION=${source_archive#apache-arrow-adbc-}
+          VERSION=${VERSION%.tar.gz}
+
+          tar xf apache-arrow-adbc-${VERSION}.tar.gz
+          mv apache-arrow-adbc-${VERSION} adbc
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: adbc/node/package-lock.json
+
+      - name: Install dependencies
+        working-directory: adbc/node
+        run: npm install
+
+      - name: Build JS
+        working-directory: adbc/node/native
+        run: npm run build
+
+      - name: Download bindings
+        uses: actions/download-artifact@v6
+        with:
+          pattern: bindings-*
+          path: adbc/node/native
+          merge-multiple: true
+
+      - name: Prepare Artifacts
+        working-directory: adbc/node/native
+        run: |
+          npx napi artifacts
+          npx napi prepublish -t npm
+          # Pack the main package
+          npm pack
+          # Pack the platform-specific packages
+          for dir in npm/*; do
+            npm pack "$dir"
+          done
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: node-packages
+          retention-days: 7
+          path: |
+            adbc/node/native/*.tgz
+
   release:
     name: "Create release"
     runs-on: ubuntu-latest
@@ -1099,6 +1234,7 @@ jobs:
       - source
       - java
       - linux
+      - node-dist
       - python-manylinux
       - python-macos
       - python-windows
@@ -1132,6 +1268,9 @@ jobs:
               -name 'ubuntu-*.tar.gz' \
             ')' \
             -exec mv '{}' upload-staging \;
+
+          # Handle Node.js packages (in tarball form)
+          find ./release-artifacts/ -name 'adbc-node-*.tgz' -exec mv '{}' upload-staging \;
 
           UPLOAD=$(find upload-staging -type f | sort | uniq)
 

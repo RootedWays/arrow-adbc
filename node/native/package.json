@@ -111,7 +111,17 @@
     "singleQuote": true,
     "arrowParens": "always"
   },
-  "dependencies": {
-    "apache-arrow": "^16.0.0"
+  "peerDependencies": {
+    "apache-arrow": "^21.1.0"
+  },
+  "optionalDependencies": {
+    "adbc-node-win32-x64-msvc": "0.0.1",
+    "adbc-node-darwin-x64": "0.0.1",
+    "adbc-node-linux-x64-gnu": "0.0.1",
+    "adbc-node-linux-x64-musl": "0.0.1",
+    "adbc-node-linux-arm64-gnu": "0.0.1",
+    "adbc-node-darwin-arm64": "0.0.1",
+    "adbc-node-linux-arm64-musl": "0.0.1",
+    "adbc-node-win32-arm64-msvc": "0.0.1"
   }
 }
