@@ -31,7 +31,36 @@ npm install adbc-node
 
 ## Usage
 
-*Usage documentation will be added as the API is implemented.*
+```typescript
+import { AdbcDatabase } from 'adbc-node';
+
+// 1. Initialize the Database with a path to an ADBC driver library
+//    (e.g., SQLite, PostgreSQL driver shared object/DLL)
+const database = new AdbcDatabase({
+  driver: "path/to/libadbc_driver_sqlite.so", // or .dylib, .dll
+});
+
+// 2. Open a Connection
+const connection = await database.connect();
+
+// 3. Create a Statement for a query
+const statement = await connection.createStatement();
+await statement.setSqlQuery("SELECT 1 AS value");
+
+// 4. Execute the query and get a RecordBatchReader
+const reader = await statement.executeQuery();
+
+// 5. Iterate over the Arrow RecordBatches
+for await (const batch of reader) {
+  console.log(`Received batch with ${batch.numRows} rows`);
+  // Process batch using Apache Arrow JS API
+}
+
+// 6. Cleanup
+await statement.close();
+await connection.close();
+await database.close();
+```
 
 ## Development
 

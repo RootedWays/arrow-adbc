@@ -6,7 +6,8 @@
   "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/napi-rs/package-template.git"
+    "url": "git+https://github.com/apache/arrow-adbc.git",
+    "directory": "node/native"
   },
   "license": "Apache-2.0",
   "browser": "browser.js",
