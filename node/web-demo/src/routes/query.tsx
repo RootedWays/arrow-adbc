@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Table as ArrowTable } from "apache-arrow";
 import { Play, Loader2, Database } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -7,14 +6,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -177,7 +168,11 @@ FROM generate_series;`);
             <SelectContent>
               {databases?.map((db) => (
                 <SelectItem key={db.id} value={db.id}>
-                  <span className="font-medium">{db.driver_name}</span>
+                  <span className="font-medium">
+                    {db.name
+                      ? `${db.name} (${db.driver_name})`
+                      : db.driver_name}
+                  </span>
                   <span className="ml-2 text-muted-foreground text-xs">
                     {db.id.substring(0, 8)}...
                   </span>
@@ -218,6 +213,12 @@ FROM generate_series;`);
               <Textarea
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    handleRunQuery();
+                  }
+                }}
                 placeholder="SELECT * FROM ..."
                 className="font-mono min-h-[120px] resize-y"
               />

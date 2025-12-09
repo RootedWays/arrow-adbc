@@ -28,7 +28,9 @@ export function ArrowGridView({
     return table.schema.fields.map((field) => ({
       accessorKey: field.name,
       header: field.name,
-      // We can add custom cell formatters here based on Arrow Type later
+      meta: {
+        type: String(field.type),
+      },
       cell: (info) => String(info.getValue()),
     }));
   }, [table.schema, userColumns]);
@@ -80,12 +82,19 @@ export function ArrowGridView({
             flatHeaders.map((header) => (
               <div
                 key={header.id}
-                className="px-4 py-3 text-left text-sm text-xs uppercase tracking-wider font-semibold border-r last:border-r-0 flex items-center"
+                className="px-4 py-2 text-left border-r last:border-r-0 flex flex-col justify-center"
                 style={{ width: header.getSize(), flexShrink: 0 }}
               >
-                {flexRender(
-                  header.column.columnDef.header,
-                  header.getContext(),
+                <div className="text-xs tracking-wider font-semibold truncate">
+                  {flexRender(
+                    header.column.columnDef.header,
+                    header.getContext(),
+                  )}
+                </div>
+                {(header.column.columnDef.meta as any)?.type && (
+                  <div className="text-[10px] text-muted-foreground font-mono truncate">
+                    {(header.column.columnDef.meta as any).type}
+                  </div>
                 )}
               </div>
             ))}

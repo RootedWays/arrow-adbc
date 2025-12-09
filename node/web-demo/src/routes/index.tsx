@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus, Trash2, Play } from "lucide-react";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -38,9 +38,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export const Route = createFileRoute("/")({
-  component: Dashboard,
+  component: Databases,
 });
 
 const DRIVER_LABELS: Record<string, string> = {
@@ -56,7 +57,7 @@ const DRIVER_LABELS: Record<string, string> = {
 const formatDriverName = (name: string) =>
   DRIVER_LABELS[name] || name.charAt(0).toUpperCase() + name.slice(1);
 
-function Dashboard() {
+function Databases() {
   const {
     data: drivers,
     isLoading: isLoadingDrivers,
@@ -80,8 +81,17 @@ function Dashboard() {
   const [selectedDriver, setSelectedDriver] = useState<string | undefined>(
     undefined,
   );
+  const [dbName, setDbName] = useState<string>("");
   const [dbUri, setDbUri] = useState<string>(":memory:");
   const [createDbError, setCreateDbError] = useState<string | null>(null);
+
+  // PostgreSQL specific states
+  const [pgUser, setPgUser] = useState<string>("");
+  const [pgPass, setPgPass] = useState<string>("");
+  const [pgHost, setPgHost] = useState<string>("localhost");
+  const [pgPort, setPgPort] = useState<string>("5432");
+  const [pgDb, setPgDb] = useState<string>("");
+  const [pgInputType, setPgInputType] = useState<"uri" | "params">("uri");
 
   const handleCreateDatabase = async () => {
     if (!selectedDriver) {
@@ -89,13 +99,30 @@ function Dashboard() {
       return;
     }
 
+    let finalDbUri = dbUri; // Default to the general dbUri state
+    if (
+      selectedDriver.toLowerCase().includes("postgres") &&
+      pgInputType === "params"
+    ) {
+      if (!pgUser || !pgHost || !pgDb) {
+        // pgPort is now optional
+        setCreateDbError(
+          "Please fill in all required PostgreSQL parameters (User, Host, Database).",
+        );
+        return;
+      }
+      finalDbUri = `postgres://${pgUser}:${pgPass}@${pgHost}:${pgPort}/${pgDb}`;
+    }
+
     setCreateDbError(null);
     try {
       const dbResponse = await createDatabaseMutation({
         data: {
           driver: selectedDriver,
+          name: dbName || null,
           options: {
-            uri: dbUri,
+            [selectedDriver.toLowerCase() === "duckdb" ? "path" : "uri"]:
+              finalDbUri,
           },
         },
       });
@@ -104,14 +131,19 @@ function Dashboard() {
         driver: `http://localhost:8080`, // Assuming same gateway
         databaseOptions: {
           backend_driver: selectedDriver,
-          uri: dbUri,
         },
       });
-
       queryClient.invalidateQueries({ queryKey: listDatabasesQueryKey() }); // Invalidate to refetch list
       setIsCreateDialogOpen(false);
       setSelectedDriver(undefined);
+      setDbName("");
       setDbUri(":memory:");
+      setPgUser("");
+      setPgPass("");
+      setPgHost("localhost");
+      setPgPort("5432");
+      setPgDb("");
+      setPgInputType("uri");
       toast.success("Database Created");
     } catch (err: any) {
       const message = err.message || "Failed to create database";
@@ -121,6 +153,26 @@ function Dashboard() {
       });
     }
   };
+
+  const isCreateButtonDisabled = useMemo(() => {
+    if (!selectedDriver || isCreatingDatabase) {
+      return true;
+    }
+    const normalizedDriver = selectedDriver.toLowerCase();
+    if (normalizedDriver.includes("postgres") && pgInputType === "params") {
+      return !pgUser || !pgHost || !pgDb; // pgPort is now optional
+    }
+    return !dbUri;
+  }, [
+    selectedDriver,
+    isCreatingDatabase,
+    pgInputType,
+    dbUri,
+    pgUser,
+    pgHost,
+    pgPort,
+    pgDb,
+  ]);
 
   const handleDeleteDatabase = (id: string) => {
     if (confirm("Are you sure you want to delete this database?")) {
@@ -152,12 +204,12 @@ function Dashboard() {
     if (normalizedDriver === "sqlite" || normalizedDriver === "duckdb") {
       return (
         <div className="grid grid-cols-4 items-start gap-4">
-          <Label htmlFor="uri" className="text-right pt-2">
+          <Label htmlFor="path" className="text-right pt-2">
             Database Path
           </Label>
           <div className="col-span-3 space-y-1">
             <Input
-              id="uri"
+              id="path"
               value={dbUri}
               onChange={(e) => setDbUri(e.target.value)}
               placeholder=":memory: or /path/to/file.db"
@@ -172,23 +224,102 @@ function Dashboard() {
     }
 
     if (normalizedDriver.includes("postgres")) {
+      const portPart = pgPort ? `:${pgPort}` : "";
+      const constructedUri = `postgres://${pgUser}:${pgPass}@${pgHost}${portPart}/${pgDb}`;
+      const maskedUri = `postgres://${pgUser}:${pgPass ? "*******" : ""}@${pgHost}${portPart}/${pgDb}`;
       return (
-        <div className="grid grid-cols-4 items-start gap-4">
-          <Label htmlFor="uri" className="text-right pt-2">
-            Connection URI
-          </Label>
-          <div className="col-span-3 space-y-1">
-            <Input
-              id="uri"
-              value={dbUri}
-              onChange={(e) => setDbUri(e.target.value)}
-              placeholder="postgres://user:pass@localhost:5432/db"
-            />
-            <p className="text-xs text-muted-foreground">
+        <Tabs
+          value={pgInputType}
+          onOnValueChange={(value) => setPgInputType(value as "uri" | "params")}
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="uri">Connection URI</TabsTrigger>
+            <TabsTrigger value="params">Parameters</TabsTrigger>
+          </TabsList>
+          <TabsContent value="uri" className="space-y-4 pt-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="uri" className="text-right">
+                Connection URI
+              </Label>
+              <Input
+                id="uri"
+                value={dbUri}
+                onChange={(e) => setDbUri(e.target.value)}
+                placeholder="postgres://user:pass@host:port/database"
+                className="col-span-3"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground col-span-4 text-center">
               Format: <code>postgres://user:password@host:port/database</code>
             </p>
-          </div>
-        </div>
+          </TabsContent>
+          <TabsContent value="params" className="space-y-4 pt-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="pgUser" className="text-right">
+                User
+              </Label>
+              <Input
+                id="pgUser"
+                value={pgUser}
+                onChange={(e) => setPgUser(e.target.value)}
+                placeholder="user"
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="pgPass" className="text-right">
+                Password
+              </Label>
+              <Input
+                id="pgPass"
+                type="password"
+                value={pgPass}
+                onChange={(e) => setPgPass(e.target.value)}
+                placeholder="password"
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="pgHost" className="text-right">
+                Host
+              </Label>
+              <Input
+                id="pgHost"
+                value={pgHost}
+                onChange={(e) => setPgHost(e.target.value)}
+                placeholder="localhost"
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="pgPort" className="text-right">
+                Port (optional)
+              </Label>
+              <Input
+                id="pgPort"
+                value={pgPort}
+                onChange={(e) => setPgPort(e.target.value)}
+                placeholder="5432"
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="pgDb" className="text-right">
+                Database
+              </Label>
+              <Input
+                id="pgDb"
+                value={pgDb}
+                onChange={(e) => setPgDb(e.target.value)}
+                placeholder="database"
+                className="col-span-3"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground col-span-4 text-center">
+              Constructed URI: <code>{maskedUri}</code>
+            </p>
+          </TabsContent>
+        </Tabs>
       );
     }
 
@@ -236,7 +367,7 @@ function Dashboard() {
 
   return (
     <div className="container mx-auto py-6">
-      <h1 className="text-3xl font-bold mb-6">Dashboard</h1>
+      <h1 className="text-3xl font-bold mb-6">Databases</h1>
 
       {/* Drivers Section */}
       <Card className="mb-8">
@@ -316,10 +447,11 @@ function Dashboard() {
               <Card key={db.id} className="flex flex-col justify-between">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg truncate" title={db.id}>
-                    {formatDriverName(db.driver_name)} - {db.id.substring(0, 8)}
-                    ...
+                    {db.name || formatDriverName(db.driver_name)}
                   </CardTitle>
-                  <CardDescription>Database ID: {db.id}</CardDescription>
+                  <CardDescription className="truncate" title={db.id}>
+                    ID: {db.id}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-2">
                   {/* Database-specific info could go here */}
@@ -351,7 +483,25 @@ function Dashboard() {
       </Card>
 
       {/* Create Database Dialog */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+      <Dialog
+        open={isCreateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCreateDialogOpen(open);
+          if (!open) {
+            // Reset all form states when dialog is closed
+            setSelectedDriver(undefined);
+            setDbName("");
+            setDbUri(":memory:");
+            setPgUser("");
+            setPgPass("");
+            setPgHost("localhost");
+            setPgPort("5432");
+            setPgDb("");
+            setPgInputType("uri");
+            setCreateDbError(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{dialogTitle}</DialogTitle>
@@ -362,6 +512,18 @@ function Dashboard() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="name" className="text-right">
+                Name
+              </Label>
+              <Input
+                id="name"
+                value={dbName}
+                onChange={(e) => setDbName(e.target.value)}
+                placeholder="My Database"
+                className="col-span-3"
+              />
+            </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="driver" className="text-right">
                 Driver
@@ -393,7 +555,7 @@ function Dashboard() {
             </Button>
             <Button
               onClick={handleCreateDatabase}
-              disabled={!selectedDriver || !dbUri || isCreatingDatabase}
+              disabled={isCreateButtonDisabled}
             >
               {isCreatingDatabase ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

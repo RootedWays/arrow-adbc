@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "gen": "npx kubb generate && npm run format",
+    "gen": "npx kubb generate && (cd .. && node fix_mutation_options.mjs) && npm run format",
     "format": "prettier --write ."
   },
   "dependencies": {
@@ -20,6 +20,7 @@
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tabs": "^1.1.13",
     "@tanstack/react-router": "^1.139.14",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.12",

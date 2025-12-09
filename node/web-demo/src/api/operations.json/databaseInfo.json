@@ -3,7 +3,8 @@
   "required": ["id", "driver_name"],
   "properties": {
     "driver_name": { "type": "string" },
-    "id": { "type": "string" }
+    "id": { "type": "string" },
+    "name": { "type": "string", "nullable": true }
   },
   "x-readme-ref-name": "DatabaseInfo"
 }

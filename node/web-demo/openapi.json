@@ -15,7 +15,7 @@
         "operationId": "delete_connection",
         "responses": {
           "204": {
-            "description": "Connection released"
+            "description": "Connection deleted using ID from bearer token"
           },
           "404": {
             "description": "Connection not found"
@@ -447,6 +447,36 @@
       }
     },
     "/databases/{id}": {
+      "get": {
+        "tags": ["crate"],
+        "operationId": "get_database",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database ID to retrieve",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Database information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Database not found"
+          }
+        }
+      },
       "delete": {
         "tags": ["crate"],
         "operationId": "delete_database",
@@ -519,6 +549,57 @@
             "description": "Failed to acquire connection"
           }
         }
+      }
+    },
+    "/databases/{id}/query": {
+      "post": {
+        "tags": ["crate"],
+        "operationId": "query_database_ipc",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Database ID to query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Arrow IPC Stream",
+            "content": {
+              "application/vnd.apache.arrow.stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Database not found"
+          },
+          "500": {
+            "description": "Failed to execute query"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
     "/drivers": {
@@ -753,22 +834,6 @@
   },
   "components": {
     "schemas": {
-      "Claims": {
-        "type": "object",
-        "required": ["sub", "scope", "exp"],
-        "properties": {
-          "exp": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "scope": {
-            "$ref": "#/components/schemas/Scope"
-          },
-          "sub": {
-            "type": "string"
-          }
-        }
-      },
       "CreateConnectionRequest": {
         "type": "object",
         "properties": {
@@ -797,6 +862,11 @@
           "driver": {
             "type": "string",
             "example": "{\"uri\": \":memory:\"}"
+          },
+          "name": {
+            "type": "string",
+            "example": "my_database",
+            "nullable": true
           },
           "options": {
             "type": "object",
@@ -833,6 +903,10 @@
           },
           "id": {
             "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
           }
         }
       },

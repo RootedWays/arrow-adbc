@@ -5,16 +5,6 @@
 
 import { z } from "zod/v4";
 
-export const scopeSchema = z.enum(["Connection", "Statement"]);
-
-export const claimsSchema = z.object({
-  exp: z.int().min(0),
-  get scope() {
-    return scopeSchema;
-  },
-  sub: z.string(),
-});
-
 export const createConnectionRequestSchema = z.object({
   options: z.optional(z.object({}).catchall(z.string())),
 });
@@ -25,6 +15,7 @@ export const createConnectionResponseSchema = z.object({
 
 export const createDatabaseRequestSchema = z.object({
   driver: z.string(),
+  name: z.string().nullish(),
   options: z.optional(z.object({}).catchall(z.string())),
 });
 
@@ -39,11 +30,14 @@ export const createStatementResponseSchema = z.object({
 export const databaseInfoSchema = z.object({
   driver_name: z.string(),
   id: z.string(),
+  name: z.string().nullish(),
 });
 
 export const queryRequestSchema = z.object({
   query: z.string(),
 });
+
+export const scopeSchema = z.enum(["Connection", "Statement"]);
 
 export const setOptionRequestSchema = z.object({
   key: z.string(),
@@ -55,7 +49,7 @@ export const setSqlQueryRequestSchema = z.object({
 });
 
 /**
- * @description Connection released
+ * @description Connection deleted using ID from bearer token
  */
 export const deleteConnection204Schema = z.any();
 
@@ -304,6 +298,24 @@ export const createDatabaseMutationResponseSchema = z.lazy(
   () => createDatabase200Schema,
 );
 
+export const getDatabasePathParamsSchema = z.object({
+  id: z.string().describe("Database ID to retrieve"),
+});
+
+/**
+ * @description Database information
+ */
+export const getDatabase200Schema = z.lazy(() => databaseInfoSchema);
+
+/**
+ * @description Database not found
+ */
+export const getDatabase404Schema = z.any();
+
+export const getDatabaseQueryResponseSchema = z.lazy(
+  () => getDatabase200Schema,
+);
+
 export const deleteDatabasePathParamsSchema = z.object({
   id: z.string().describe("Database ID to delete"),
 });
@@ -349,6 +361,33 @@ export const createConnectionMutationRequestSchema = z
 
 export const createConnectionMutationResponseSchema = z.lazy(
   () => createConnection200Schema,
+);
+
+export const queryDatabaseIpcPathParamsSchema = z.object({
+  id: z.string().describe("Database ID to query"),
+});
+
+/**
+ * @description Arrow IPC Stream
+ */
+export const queryDatabaseIpc200Schema = z.instanceof(File);
+
+/**
+ * @description Database not found
+ */
+export const queryDatabaseIpc404Schema = z.any();
+
+/**
+ * @description Failed to execute query
+ */
+export const queryDatabaseIpc500Schema = z.any();
+
+export const queryDatabaseIpcMutationRequestSchema = z.lazy(
+  () => queryRequestSchema,
+);
+
+export const queryDatabaseIpcMutationResponseSchema = z.lazy(
+  () => queryDatabaseIpc200Schema,
 );
 
 /**

@@ -3,31 +3,6 @@
  * Do not edit manually.
  */
 
-export const scopeEnum = {
-  Connection: "Connection",
-  Statement: "Statement",
-} as const;
-
-export type ScopeEnumKey = (typeof scopeEnum)[keyof typeof scopeEnum];
-
-export type Scope = ScopeEnumKey;
-
-export type Claims = {
-  /**
-   * @minLength 0
-   * @type integer
-   */
-  exp: number;
-  /**
-   * @type string
-   */
-  scope: Scope;
-  /**
-   * @type string
-   */
-  sub: string;
-};
-
 export type CreateConnectionRequest = {
   /**
    * @type object | undefined
@@ -49,6 +24,10 @@ export type CreateDatabaseRequest = {
    * @type string
    */
   driver: string;
+  /**
+   * @type string
+   */
+  name?: string | null;
   /**
    * @type object | undefined
    */
@@ -80,6 +59,10 @@ export type DatabaseInfo = {
    * @type string
    */
   id: string;
+  /**
+   * @type string
+   */
+  name?: string | null;
 };
 
 export type QueryRequest = {
@@ -88,6 +71,15 @@ export type QueryRequest = {
    */
   query: string;
 };
+
+export const scopeEnum = {
+  Connection: "Connection",
+  Statement: "Statement",
+} as const;
+
+export type ScopeEnumKey = (typeof scopeEnum)[keyof typeof scopeEnum];
+
+export type Scope = ScopeEnumKey;
 
 export type SetOptionRequest = {
   /**
@@ -108,7 +100,7 @@ export type SetSqlQueryRequest = {
 };
 
 /**
- * @description Connection released
+ * @description Connection deleted using ID from bearer token
  */
 export type DeleteConnection204 = any;
 
@@ -417,6 +409,32 @@ export type CreateDatabaseMutation = {
   Errors: CreateDatabase400 | CreateDatabase500;
 };
 
+export type GetDatabasePathParams = {
+  /**
+   * @description Database ID to retrieve
+   * @type string
+   */
+  id: string;
+};
+
+/**
+ * @description Database information
+ */
+export type GetDatabase200 = DatabaseInfo;
+
+/**
+ * @description Database not found
+ */
+export type GetDatabase404 = any;
+
+export type GetDatabaseQueryResponse = GetDatabase200;
+
+export type GetDatabaseQuery = {
+  Response: GetDatabase200;
+  PathParams: GetDatabasePathParams;
+  Errors: GetDatabase404;
+};
+
 export type DeleteDatabasePathParams = {
   /**
    * @description Database ID to delete
@@ -475,6 +493,40 @@ export type CreateConnectionMutation = {
   Request: CreateConnectionMutationRequest;
   PathParams: CreateConnectionPathParams;
   Errors: CreateConnection404 | CreateConnection500;
+};
+
+export type QueryDatabaseIpcPathParams = {
+  /**
+   * @description Database ID to query
+   * @type string
+   */
+  id: string;
+};
+
+/**
+ * @description Arrow IPC Stream
+ */
+export type QueryDatabaseIpc200 = Blob;
+
+/**
+ * @description Database not found
+ */
+export type QueryDatabaseIpc404 = any;
+
+/**
+ * @description Failed to execute query
+ */
+export type QueryDatabaseIpc500 = any;
+
+export type QueryDatabaseIpcMutationRequest = QueryRequest;
+
+export type QueryDatabaseIpcMutationResponse = QueryDatabaseIpc200;
+
+export type QueryDatabaseIpcMutation = {
+  Response: QueryDatabaseIpc200;
+  Request: QueryDatabaseIpcMutationRequest;
+  PathParams: QueryDatabaseIpcPathParams;
+  Errors: QueryDatabaseIpc404 | QueryDatabaseIpc500;
 };
 
 /**

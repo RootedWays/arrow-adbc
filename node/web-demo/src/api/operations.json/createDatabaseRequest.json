@@ -3,6 +3,7 @@
   "required": ["driver"],
   "properties": {
     "driver": { "type": "string", "example": "{\"uri\": \":memory:\"}" },
+    "name": { "type": "string", "example": "my_database", "nullable": true },
     "options": {
       "type": "object",
       "additionalProperties": { "type": "string" }

@@ -17,6 +17,8 @@ export type { GetConnectionTableSchemaQueryKey } from "./hooks/useGetConnectionT
 export type { GetConnectionTableSchemaSuspenseQueryKey } from "./hooks/useGetConnectionTableSchemaSuspense.ts";
 export type { GetConnectionTableTypesQueryKey } from "./hooks/useGetConnectionTableTypes.ts";
 export type { GetConnectionTableTypesSuspenseQueryKey } from "./hooks/useGetConnectionTableTypesSuspense.ts";
+export type { GetDatabaseQueryKey } from "./hooks/useGetDatabase.ts";
+export type { GetDatabaseSuspenseQueryKey } from "./hooks/useGetDatabaseSuspense.ts";
 export type { HealthCheckQueryKey } from "./hooks/useHealthCheck.ts";
 export type { HealthCheckSuspenseQueryKey } from "./hooks/useHealthCheckSuspense.ts";
 export type { ListDatabasesQueryKey } from "./hooks/useListDatabases.ts";
@@ -25,14 +27,12 @@ export type { ListDriversQueryKey } from "./hooks/useListDrivers.ts";
 export type { ListDriversSuspenseQueryKey } from "./hooks/useListDriversSuspense.ts";
 export type { PrepareStatementMutationKey } from "./hooks/usePrepareStatement.ts";
 export type { QueryConnectionIpcMutationKey } from "./hooks/useQueryConnectionIpc.ts";
+export type { QueryDatabaseIpcMutationKey } from "./hooks/useQueryDatabaseIpc.ts";
 export type { RollbackConnectionMutationKey } from "./hooks/useRollbackConnection.ts";
 export type { SetConnectionOptionMutationKey } from "./hooks/useSetConnectionOption.ts";
 export type { SetStatementOptionMutationKey } from "./hooks/useSetStatementOption.ts";
 export type { SetStatementSqlQueryMutationKey } from "./hooks/useSetStatementSqlQuery.ts";
 export type {
-  ScopeEnumKey,
-  Scope,
-  Claims,
   CreateConnectionRequest,
   CreateConnectionResponse,
   CreateDatabaseRequest,
@@ -40,6 +40,8 @@ export type {
   CreateStatementResponse,
   DatabaseInfo,
   QueryRequest,
+  ScopeEnumKey,
+  Scope,
   SetOptionRequest,
   SetSqlQueryRequest,
   DeleteConnection204,
@@ -106,6 +108,11 @@ export type {
   CreateDatabaseMutationRequest,
   CreateDatabaseMutationResponse,
   CreateDatabaseMutation,
+  GetDatabasePathParams,
+  GetDatabase200,
+  GetDatabase404,
+  GetDatabaseQueryResponse,
+  GetDatabaseQuery,
   DeleteDatabasePathParams,
   DeleteDatabase204,
   DeleteDatabase404,
@@ -118,6 +125,13 @@ export type {
   CreateConnectionMutationRequest,
   CreateConnectionMutationResponse,
   CreateConnectionMutation,
+  QueryDatabaseIpcPathParams,
+  QueryDatabaseIpc200,
+  QueryDatabaseIpc404,
+  QueryDatabaseIpc500,
+  QueryDatabaseIpcMutationRequest,
+  QueryDatabaseIpcMutationResponse,
+  QueryDatabaseIpcMutation,
   ListDrivers200,
   ListDriversQueryResponse,
   ListDriversQuery,
@@ -238,6 +252,14 @@ export { getConnectionTableTypesSuspenseQueryKey } from "./hooks/useGetConnectio
 export { getConnectionTableTypesSuspense } from "./hooks/useGetConnectionTableTypesSuspense.ts";
 export { getConnectionTableTypesSuspenseQueryOptions } from "./hooks/useGetConnectionTableTypesSuspense.ts";
 export { useGetConnectionTableTypesSuspense } from "./hooks/useGetConnectionTableTypesSuspense.ts";
+export { getDatabaseQueryKey } from "./hooks/useGetDatabase.ts";
+export { getDatabase } from "./hooks/useGetDatabase.ts";
+export { getDatabaseQueryOptions } from "./hooks/useGetDatabase.ts";
+export { useGetDatabase } from "./hooks/useGetDatabase.ts";
+export { getDatabaseSuspenseQueryKey } from "./hooks/useGetDatabaseSuspense.ts";
+export { getDatabaseSuspense } from "./hooks/useGetDatabaseSuspense.ts";
+export { getDatabaseSuspenseQueryOptions } from "./hooks/useGetDatabaseSuspense.ts";
+export { useGetDatabaseSuspense } from "./hooks/useGetDatabaseSuspense.ts";
 export { healthCheckQueryKey } from "./hooks/useHealthCheck.ts";
 export { healthCheck } from "./hooks/useHealthCheck.ts";
 export { healthCheckQueryOptions } from "./hooks/useHealthCheck.ts";
@@ -270,6 +292,10 @@ export { queryConnectionIpcMutationKey } from "./hooks/useQueryConnectionIpc.ts"
 export { queryConnectionIpc } from "./hooks/useQueryConnectionIpc.ts";
 export { queryConnectionIpcMutationOptions } from "./hooks/useQueryConnectionIpc.ts";
 export { useQueryConnectionIpc } from "./hooks/useQueryConnectionIpc.ts";
+export { queryDatabaseIpcMutationKey } from "./hooks/useQueryDatabaseIpc.ts";
+export { queryDatabaseIpc } from "./hooks/useQueryDatabaseIpc.ts";
+export { queryDatabaseIpcMutationOptions } from "./hooks/useQueryDatabaseIpc.ts";
+export { useQueryDatabaseIpc } from "./hooks/useQueryDatabaseIpc.ts";
 export { rollbackConnectionMutationKey } from "./hooks/useRollbackConnection.ts";
 export { rollbackConnection } from "./hooks/useRollbackConnection.ts";
 export { rollbackConnectionMutationOptions } from "./hooks/useRollbackConnection.ts";
@@ -288,8 +314,6 @@ export { setStatementSqlQueryMutationOptions } from "./hooks/useSetStatementSqlQ
 export { useSetStatementSqlQuery } from "./hooks/useSetStatementSqlQuery.ts";
 export { scopeEnum } from "./types.ts";
 export {
-  scopeSchema,
-  claimsSchema,
   createConnectionRequestSchema,
   createConnectionResponseSchema,
   createDatabaseRequestSchema,
@@ -297,6 +321,7 @@ export {
   createStatementResponseSchema,
   databaseInfoSchema,
   queryRequestSchema,
+  scopeSchema,
   setOptionRequestSchema,
   setSqlQueryRequestSchema,
   deleteConnection204Schema,
@@ -350,6 +375,10 @@ export {
   createDatabase500Schema,
   createDatabaseMutationRequestSchema,
   createDatabaseMutationResponseSchema,
+  getDatabasePathParamsSchema,
+  getDatabase200Schema,
+  getDatabase404Schema,
+  getDatabaseQueryResponseSchema,
   deleteDatabasePathParamsSchema,
   deleteDatabase204Schema,
   deleteDatabase404Schema,
@@ -360,6 +389,12 @@ export {
   createConnection500Schema,
   createConnectionMutationRequestSchema,
   createConnectionMutationResponseSchema,
+  queryDatabaseIpcPathParamsSchema,
+  queryDatabaseIpc200Schema,
+  queryDatabaseIpc404Schema,
+  queryDatabaseIpc500Schema,
+  queryDatabaseIpcMutationRequestSchema,
+  queryDatabaseIpcMutationResponseSchema,
   listDrivers200Schema,
   listDriversQueryResponseSchema,
   healthCheck200Schema,
