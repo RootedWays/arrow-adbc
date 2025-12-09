@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # Driver: adbc_driver_postgresql
   postgres:
-    image: postgres:17-ubuntu # Changed to postgres:17-ubuntu as requested
+    image: postgres:17
     container_name: adbc_postgres
     ports:
       - "5432:5432"
