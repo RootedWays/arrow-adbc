@@ -41,3 +41,6 @@ r/*/.Rbuildignore
 r/*/tests/testthat/_snaps/*
 rust/Cargo.lock
 testing/*
+node/core/Cargo.lock
+node/native/binding.d.ts
+node/native/binding.js
