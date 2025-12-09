@@ -88,7 +88,7 @@ test.serial('transaction: commit persists changes', async (t) => {
 
         await conn.commit();
         t.pass("Commit successful");
-        
+
         // ADBC Spec: "Calling commit or rollback on the connection may invalidate active statements."
         // To ensure robust verification, create a fresh statement to read back the committed data.
         const verifyStmt = await conn.createStatement();

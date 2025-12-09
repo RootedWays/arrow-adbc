@@ -48,7 +48,7 @@ test.after.always(async (t) => {
 
 test('statement: bind and query data', async (t) => {
     const { stmt } = t.context;
-    
+
     // Prepare data to bind using tableFromArrays
     const recordBatchToBind = tableFromArrays({
         id: [null],
@@ -56,7 +56,7 @@ test('statement: bind and query data', async (t) => {
     });
 
     t.is(recordBatchToBind.numRows, 1, "Table to bind has 1 row");
-    
+
     // Bind data
     await stmt.bind(recordBatchToBind);
     t.pass("Data bound successfully");

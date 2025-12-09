@@ -48,7 +48,7 @@ test.after.always(async (t) => {
 test.serial('error: invalid sql syntax', async (t) => {
     const { stmt } = t.context;
     await stmt.setSqlQuery("SELECT * FROM"); // Syntax error
-    
+
     const error = await t.throwsAsync(async () => {
         const reader = await stmt.executeQuery();
         for await (const _ of reader) {}
@@ -66,7 +66,7 @@ test.serial('error: invalid sql syntax', async (t) => {
 test.serial('error: table not found', async (t) => {
     const { stmt } = t.context;
     await stmt.setSqlQuery("SELECT * FROM non_existent_table");
-    
+
     const error = await t.throwsAsync(async () => {
         const reader = await stmt.executeQuery();
         for await (const _ of reader) {}
@@ -78,12 +78,12 @@ test.serial('error: table not found', async (t) => {
 
 test.serial('error: constraint violation', async (t) => {
     const { conn } = t.context;
-    
+
     // Use a dedicated statement for setup
     const setupStmt = await conn.createStatement();
     await setupStmt.setSqlQuery("CREATE TABLE IF NOT EXISTS err_test (id INTEGER PRIMARY KEY)");
     await setupStmt.executeUpdate();
-    
+
     await setupStmt.setSqlQuery("INSERT INTO err_test (id) VALUES (1)");
     await setupStmt.executeUpdate();
     await setupStmt.close();
@@ -103,11 +103,11 @@ test.serial('error: constraint violation', async (t) => {
 
 test.serial('error: invalid option', async (t) => {
     const { conn } = t.context;
-    
+
     const error = t.throws(() => {
-        conn.setOption("readonly", "invalid_boolean"); 
+        conn.setOption("readonly", "invalid_boolean");
     });
-    
+
     if (!(error instanceof AdbcError)) {
         t.log("Error is not AdbcError. Message:", error?.message);
     }

@@ -19,31 +19,31 @@ import { RecordBatch, RecordBatchReader, Table, Schema } from 'apache-arrow';
 
 /**
  * Options for connecting to a driver/database.
- * 
+ *
  * These options configure how the ADBC driver is loaded and how the initial connection is established.
  */
 export interface ConnectOptions {
-  /** 
-   * Path to the driver library or name of the driver. 
+  /**
+   * Path to the driver library or name of the driver.
    * For example: "adbc_driver_sqlite" or "/path/to/libadbc_driver_sqlite.so".
    */
   driver: string;
-  /** 
-   * Name of the entrypoint function (optional). 
+  /**
+   * Name of the entrypoint function (optional).
    * If not provided, ADBC will attempt to guess the entrypoint symbol name based on the driver name.
    */
   entrypoint?: string;
-  /** 
-   * Paths to search for the driver (optional). 
+  /**
+   * Paths to search for the driver (optional).
    * Useful if the driver is not in the standard library paths.
    */
   searchPaths?: string[];
-  /** 
-   * Load flags (optional). 
+  /**
+   * Load flags (optional).
    * Bitmask controlling how the driver is loaded (e.g., search system paths, search user paths).
    */
   loadFlags?: number;
-  /** 
+  /**
    * Database-specific options.
    * Key-value pairs passed to the driver during database initialization (e.g., "uri", "username").
    */
@@ -52,8 +52,8 @@ export interface ConnectOptions {
 
 /** Options for statement execution. */
 export interface QueryOptions {
-  /** 
-   * Statement-specific options. 
+  /**
+   * Statement-specific options.
    * Key-value pairs configured on the statement before execution (e.g., "adbc.ingest.target_table").
    */
   statementOptions?: Record<string, string>;
@@ -84,21 +84,21 @@ export interface GetObjectsOptions {
 
 /**
  * Represents an ADBC Database.
- * 
+ *
  * An AdbcDatabase represents a handle to a database. This may be a single file (SQLite),
  * a connection configuration (PostgreSQL), or an in-memory database.
  * It holds state that is shared across multiple connections.
  */
 export interface AdbcDatabase {
-  /** 
-   * Open a new connection to the database. 
-   * 
+  /**
+   * Open a new connection to the database.
+   *
    * @returns A Promise resolving to a new AdbcConnection.
    */
   connect(): Promise<AdbcConnection>;
-  
-  /** 
-   * Release the database resources. 
+
+  /**
+   * Release the database resources.
    * After closing, the database object should not be used.
    */
   close(): Promise<void>;
@@ -106,21 +106,21 @@ export interface AdbcDatabase {
 
 /**
  * Represents a single connection to a database.
- * 
+ *
  * An AdbcConnection maintains the state of a connection to the database, such as
  * current transaction state and session options.
  */
 export interface AdbcConnection {
-  /** 
-   * Create a new statement for executing queries. 
-   * 
+  /**
+   * Create a new statement for executing queries.
+   *
    * @returns A Promise resolving to a new AdbcStatement.
    */
   createStatement(): Promise<AdbcStatement>;
-  
-  /** 
-   * Set an option on the connection. 
-   * 
+
+  /**
+   * Set an option on the connection.
+   *
    * @param key The option name (e.g., "adbc.connection.autocommit").
    * @param value The option value.
    */
@@ -128,29 +128,29 @@ export interface AdbcConnection {
 
   /**
    * Toggle autocommit behavior.
-   * 
+   *
    * @param enabled Whether autocommit should be enabled.
    */
   setAutoCommit(enabled: boolean): void;
 
   /**
    * Toggle read-only mode.
-   * 
+   *
    * @param enabled Whether the connection should be read-only.
    */
   setReadOnly(enabled: boolean): void;
-  
-  /** 
+
+  /**
    * Get a hierarchical view of database objects (catalogs, schemas, tables, columns).
-   * 
+   *
    * @param options Filtering options for the metadata query.
    * @returns A RecordBatchReader containing the metadata.
    */
   getObjects(options?: GetObjectsOptions): Promise<RecordBatchReader>;
-  
+
   /**
    * Get the Arrow schema for a specific table.
-   * 
+   *
    * @param options An object containing catalog, dbSchema, and tableName.
    * @param options.catalog The catalog name (or undefined).
    * @param options.dbSchema The schema name (or undefined).
@@ -158,89 +158,89 @@ export interface AdbcConnection {
    * @returns A Promise resolving to the Arrow Schema of the table.
    */
   getTableSchema(options: { catalog?: string; dbSchema?: string; tableName: string }): Promise<Schema>;
-  
-  /** 
-   * Get a list of table types supported by the database. 
-   * 
+
+  /**
+   * Get a list of table types supported by the database.
+   *
    * @returns A RecordBatchReader containing a single string column of table types.
    */
   getTableTypes(): Promise<RecordBatchReader>;
-  
-  /** 
+
+  /**
    * Get metadata about the driver and database.
-   * 
+   *
    * @param infoCodes Optional list of integer info codes to retrieve.
    * @returns A RecordBatchReader containing the requested metadata info.
    */
   getInfo(infoCodes?: number[]): Promise<RecordBatchReader>;
 
-  /** 
-   * Commit any pending transactions. 
+  /**
+   * Commit any pending transactions.
    * Only valid if autocommit is disabled.
    */
   commit(): Promise<void>;
 
-  /** 
-   * Rollback any pending transactions. 
+  /**
+   * Rollback any pending transactions.
    * Only valid if autocommit is disabled.
    */
   rollback(): Promise<void>;
 
-  /** 
-   * Close the connection and release resources. 
+  /**
+   * Close the connection and release resources.
    */
   close(): Promise<void>;
 }
 
 /**
  * Represents a query statement.
- * 
+ *
  * An AdbcStatement is used to execute SQL queries or prepare bulk insertions.
  * State such as the SQL query string or bound parameters is held by the statement.
  */
 export interface AdbcStatement {
-  /** 
-   * Set the SQL query string. 
-   * 
+  /**
+   * Set the SQL query string.
+   *
    * @param query The SQL query to execute.
    */
   setSqlQuery(query: string): Promise<void>;
-  
-  /** 
-   * Set an option on the statement. 
-   * 
+
+  /**
+   * Set an option on the statement.
+   *
    * @param key The option name (e.g., "adbc.ingest.target_table").
    * @param value The option value.
    */
   setOption(key: string, value: string): void;
 
-  /** 
-   * Execute the query and return a stream of results. 
-   * 
+  /**
+   * Execute the query and return a stream of results.
+   *
    * @returns A Promise resolving to an Apache Arrow RecordBatchReader.
    * The reader must be consumed or closed to release resources.
    */
   executeQuery(): Promise<RecordBatchReader>;
-  
-  /** 
+
+  /**
    * Execute an update command (e.g., INSERT, UPDATE, DELETE) that returns no data.
-   * 
+   *
    * @returns A Promise resolving to the number of rows affected (if known), or -1.
    */
   executeUpdate(): Promise<number | bigint>;
 
   /**
    * Bind parameters or data for ingestion.
-   * 
+   *
    * This binds an Arrow RecordBatch or Table to the statement.
    * This is used for bulk ingestion or parameterized queries.
-   * 
+   *
    * @param data Arrow RecordBatch or Table containing the data to bind.
    */
   bind(data: RecordBatch | Table): Promise<void>;
 
-  /** 
-   * Close the statement and release resources. 
+  /**
+   * Close the statement and release resources.
    */
   close(): Promise<void>;
 }

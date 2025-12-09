@@ -46,7 +46,7 @@ test.after.always(async (t) => {
 
 test('options: connection setOption', async (t) => {
     const { conn } = t.context;
-    
+
     // Test setting autocommit explicitly via string (Supported by SQLite)
     t.notThrows(() => {
         conn.setOption("autocommit", "true");
@@ -74,7 +74,7 @@ test('options: connection setOption', async (t) => {
 
 test('options: statement setOption', async (t) => {
     const { stmt } = t.context;
-    
+
     // Test setting an unknown statement option (SQLite driver is strict)
     const error = t.throws(() => {
         stmt.setOption("adbc.stmt.some_option", "value");

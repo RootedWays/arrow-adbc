@@ -31,9 +31,9 @@ test.before(async (t) => {
   const db = await createSqliteDatabase();
   const conn = await db.connect();
   const stmt = await conn.createStatement();
-  
+
   await createTestTable(stmt, "metadata_test");
-  
+
   t.context = { db, conn, stmt };
 });
 
@@ -50,7 +50,7 @@ test.after.always(async (t) => {
 test('metadata: getTableTypes', async (t) => {
     const { conn } = t.context;
     const tableTypes = await dumpReader(await conn.getTableTypes());
-    
+
     // Sort actual results for consistent comparison with t.like
     tableTypes.sort((a, b) => (a.table_type || '').localeCompare(b.table_type || ''));
 
@@ -63,7 +63,7 @@ test('metadata: getTableTypes', async (t) => {
 test('metadata: getTableSchema', async (t) => {
     const { conn } = t.context;
     const schema = await conn.getTableSchema({ tableName: "metadata_test" });
-    
+
     t.like(schema.fields, [
       { name: "id", nullable: true }, // SQLite typically makes INTEGER nullable
       { name: "name", nullable: true }, // TEXT is also nullable by default
@@ -97,6 +97,6 @@ test('metadata: getObjects', async (t) => {
 test('metadata: getInfo', async (t) => {
     const { conn } = t.context;
     const info = await dumpReader(await conn.getInfo());
-    
+
     t.like(info[0], { info_name: 0, info_value: 'SQLite' }, "First driver info record should be SQLite driver name");
 });

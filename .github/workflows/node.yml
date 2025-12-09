@@ -143,7 +143,7 @@ jobs:
           name: bindings-${{ matrix.settings.target }}
           path: node/native
       - name: Build Driver
-        # We need to build the SQLite driver for tests. 
+        # We need to build the SQLite driver for tests.
         # This assumes the host has CMake and C++ compiler.
         working-directory: node/native
         run: npm run build:driver

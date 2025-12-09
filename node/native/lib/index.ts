@@ -15,18 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { 
-    NativeAdbcDatabase, 
-    NativeAdbcConnection, 
-    NativeAdbcStatement, 
-    NativeAdbcStatementIterator 
+import {
+    NativeAdbcDatabase,
+    NativeAdbcConnection,
+    NativeAdbcStatement,
+    NativeAdbcStatementIterator
 } from '../binding.js';
 
-import type { 
-    AdbcDatabase as AdbcDatabaseInterface, 
-    AdbcConnection as AdbcConnectionInterface, 
-    AdbcStatement as AdbcStatementInterface, 
-    ConnectOptions, 
+import type {
+    AdbcDatabase as AdbcDatabaseInterface,
+    AdbcConnection as AdbcConnectionInterface,
+    AdbcStatement as AdbcStatementInterface,
+    ConnectOptions,
     QueryOptions,
     GetObjectsOptions
 } from '../../shared/src/index';
@@ -242,7 +242,7 @@ export class AdbcStatement implements AdbcStatementInterface {
         try {
             const iterator = await this._inner.executeQuery();
             const nativeIter = iterator as NativeAdbcStatementIterator;
-            
+
             const asyncIterable: AsyncIterable<Uint8Array> = {
                 [Symbol.asyncIterator]: async function* () {
                     try {
@@ -260,7 +260,7 @@ export class AdbcStatement implements AdbcStatementInterface {
                     }
                 }
             };
-    
+
             return RecordBatchReader.from(asyncIterable);
         } catch (e) {
             throw AdbcError.fromError(e);
@@ -284,7 +284,7 @@ export class AdbcStatement implements AdbcStatementInterface {
             } else {
                 table = new Table(data);
             }
-    
+
             const ipcBytes = tableToIPC(table, "stream");
             await this._inner.bind(Buffer.from(ipcBytes));
         } catch (e) {

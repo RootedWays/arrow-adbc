@@ -16,14 +16,14 @@
 // under the License.
 
 use adbc_client::{
-    ConnectOptions as CoreConnectOptions, 
-    GetObjectsOptions as CoreGetObjectsOptions, 
+    ConnectOptions as CoreConnectOptions,
+    GetObjectsOptions as CoreGetObjectsOptions,
     GetTableSchemaOptions as CoreGetTableSchemaOptions,
     QueryOptions as CoreQueryOptions,
-    _AdbcConnectionCore as CoreConnection, 
-    _AdbcConnectionResultIteratorCore as CoreConnectionIterator, 
-    _AdbcDatabaseCore as CoreDatabase, 
-    _AdbcStatementCore as CoreStatement, 
+    _AdbcConnectionCore as CoreConnection,
+    _AdbcConnectionResultIteratorCore as CoreConnectionIterator,
+    _AdbcDatabaseCore as CoreDatabase,
+    _AdbcStatementCore as CoreStatement,
     _AdbcStatementIteratorCore as CoreIterator
 };
 use adbc_core::{options::AdbcVersion, LoadFlags};
@@ -45,7 +45,7 @@ fn to_napi_err(err: ClientError) -> Error {
             let sqlstate_u8: Vec<u8> = e.sqlstate.iter().map(|&c| c as u8).collect();
             let sqlstate = std::str::from_utf8(&sqlstate_u8).unwrap_or("UNKNOWN");
             let reason = format!(
-                "[{:?}] {} (Vendor Code: {}, SQL State: {})", 
+                "[{:?}] {} (Vendor Code: {}, SQL State: {})",
                 e.status, e.message, e.vendor_code, sqlstate
             );
             Error::new(Status::GenericFailure, reason)
@@ -565,7 +565,7 @@ impl _NativeAdbcStatementIterator {
             iterator: iterator.clone(),
         }))
     }
-    
+
     #[napi]
     pub fn close(&mut self) -> Result<()> {
         self.inner.take();

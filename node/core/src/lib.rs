@@ -144,7 +144,7 @@ impl _AdbcConnectionCore {
             4 => ObjectDepth::Columns,
             _ => ObjectDepth::All,
         };
-        
+
         let table_types_str: Option<Vec<&str>> = opts.table_type.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
 
         let reader = conn.get_objects(
@@ -170,7 +170,7 @@ impl _AdbcConnectionCore {
     pub fn get_table_schema(&self, opts: GetTableSchemaOptions) -> Result<Vec<u8>> {
         let conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
         let schema = conn.get_table_schema(opts.catalog.as_deref(), opts.db_schema.as_deref(), &opts.table_name)?;
-        
+
         let mut output = Vec::new();
         let _writer = StreamWriter::try_new(&mut output, &schema)?;
         Ok(output)
@@ -179,7 +179,7 @@ impl _AdbcConnectionCore {
     pub fn get_table_types(&self) -> Result<_AdbcConnectionResultIteratorCore> {
         let conn = self.inner.lock().map_err(|e| ClientError::Other(e.to_string()))?;
         let reader = conn.get_table_types()?;
-        
+
         let reader: Box<dyn RecordBatchReader + Send> = unsafe {
             std::mem::transmute(Box::new(reader) as Box<dyn RecordBatchReader + Send>)
         };
@@ -240,7 +240,7 @@ impl _AdbcStatementCore {
 
     pub fn execute_query(&mut self) -> Result<_AdbcStatementIteratorCore> {
         let reader = self.inner.execute()?;
-        
+
         let reader: Box<dyn RecordBatchReader + Send> = unsafe {
             std::mem::transmute(Box::new(reader) as Box<dyn RecordBatchReader + Send>)
         };
@@ -251,7 +251,7 @@ impl _AdbcStatementCore {
             schema: None,
         })
     }
-    
+
     pub fn execute_update(&mut self) -> Result<i64> {
         let rows = self.inner.execute_update()?;
         Ok(rows.unwrap_or(-1))
@@ -260,7 +260,7 @@ impl _AdbcStatementCore {
     pub fn bind(&mut self, c_data: &[u8]) -> Result<()> {
         let mut reader = StreamReader::try_new(std::io::Cursor::new(c_data), None)
             .map_err(|e| ClientError::Arrow(e))?;
-        
+
         if let Some(batch_result) = reader.next() {
             let batch = batch_result.map_err(|e| ClientError::Arrow(e))?;
             self.inner.bind(batch)?;
@@ -280,7 +280,7 @@ impl _AdbcStatementIteratorCore {
         if self.schema.is_none() {
             self.schema = Some(self.reader.schema());
         }
-        
+
         match self.reader.next() {
             Some(Ok(batch)) => {
                 let mut output = Vec::new();
@@ -306,7 +306,7 @@ impl _AdbcConnectionResultIteratorCore {
         if self.schema.is_none() {
             self.schema = Some(self.reader.schema());
         }
-        
+
         match self.reader.next() {
             Some(Ok(batch)) => {
                 let mut output = Vec::new();

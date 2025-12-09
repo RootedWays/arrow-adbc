@@ -69,7 +69,7 @@ test('safety: iterator survives connection close', async (t) => {
   // This test verifies that "Safety" mechanism: ensuring that premature closure of the parent
   // handle does not crash the process or interrupt the child stream.
   const { stmt, conn, db } = t.context;
-  
+
   if (!stmt || !conn || !db) {
       t.fail("Setup failed");
       return;
@@ -90,7 +90,7 @@ test('safety: iterator survives connection close', async (t) => {
 
   await db.close();
   delete t.context.db;
-  
+
   t.pass("Resources closed");
 
   // 4. Iterate
