@@ -90,7 +90,7 @@ pub fn sign_token(
 
 pub struct ConnectionClaims {
     pub connection_id: String,
-    pub database_id: String,
+    pub _database_id: String,
 }
 
 #[async_trait]
@@ -108,14 +108,14 @@ where
         let database_id = claims.parent_id.ok_or(AuthError::MissingCredentials)?;
         Ok(ConnectionClaims {
             connection_id: claims.res_id,
-            database_id,
+            _database_id: database_id,
         })
     }
 }
 
 pub struct StatementClaims {
     pub statement_id: String,
-    pub connection_id: String,
+    pub _connection_id: String,
 }
 
 #[async_trait]
@@ -133,7 +133,7 @@ where
         let connection_id = claims.parent_id.ok_or(AuthError::MissingCredentials)?;
         Ok(StatementClaims {
             statement_id: claims.res_id,
-            connection_id,
+            _connection_id: connection_id,
         })
     }
 }

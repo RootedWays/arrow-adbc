@@ -347,10 +347,7 @@ async fn query_connection_ipc(
 
         if let Err(e) = result {
             tracing::error!("Streaming error: {}", e);
-            let _ = tx.blocking_send(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )));
+            let _ = tx.blocking_send(Err(std::io::Error::other(e.to_string())));
         }
     });
 
@@ -976,7 +973,7 @@ async fn handle_statement_action(
 
     let mut stmt_guard = stmt_entry.statement.lock().await;
 
-    action(&mut *stmt_guard).map_err(|e| {
+    action(&mut stmt_guard).map_err(|e| {
         let status = match e.status {
             adbc_core::error::Status::NotImplemented => StatusCode::NOT_IMPLEMENTED,
             adbc_core::error::Status::InvalidState => StatusCode::CONFLICT,
@@ -1173,10 +1170,7 @@ async fn execute_statement_query(
 
         if let Err(e) = result {
             tracing::error!("Streaming error: {}", e);
-            let _ = tx.blocking_send(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )));
+            let _ = tx.blocking_send(Err(std::io::Error::other(e.to_string())));
         }
     });
 
@@ -1233,10 +1227,7 @@ async fn get_connection_info(
 
         if let Err(e) = result {
             tracing::error!("Streaming error: {}", e);
-            let _ = tx.blocking_send(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )));
+            let _ = tx.blocking_send(Err(std::io::Error::other(e.to_string())));
         }
     });
 
@@ -1320,10 +1311,7 @@ async fn get_connection_objects(
 
         if let Err(e) = result {
             tracing::error!("Streaming error: {}", e);
-            let _ = tx.blocking_send(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )));
+            let _ = tx.blocking_send(Err(std::io::Error::other(e.to_string())));
         }
     });
 
@@ -1380,10 +1368,7 @@ async fn get_connection_table_types(
 
         if let Err(e) = result {
             tracing::error!("Streaming error: {}", e);
-            let _ = tx.blocking_send(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )));
+            let _ = tx.blocking_send(Err(std::io::Error::other(e.to_string())));
         }
     });
 
@@ -1450,10 +1435,7 @@ async fn get_connection_table_schema(
 
         if let Err(e) = result {
             tracing::error!("Streaming error: {}", e);
-            let _ = tx.blocking_send(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )));
+            let _ = tx.blocking_send(Err(std::io::Error::other(e.to_string())));
         }
     });
 
@@ -1524,10 +1506,7 @@ async fn query_database_ipc(
 
         if let Err(e) = result {
             tracing::error!("Streaming error: {}", e);
-            let _ = tx.blocking_send(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )));
+            let _ = tx.blocking_send(Err(std::io::Error::other(e.to_string())));
         }
     });
 
