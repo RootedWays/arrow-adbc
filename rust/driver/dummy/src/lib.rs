@@ -175,6 +175,18 @@ where
     }
 }
 
+fn maybe_panic(fnname: impl AsRef<str>) {
+    if let Some(func) = std::env::var_os("PANICDUMMY_FUNC").map(|x| x.to_string_lossy().to_string())
+    {
+        if fnname.as_ref() == func {
+            let message = std::env::var_os("PANICDUMMY_MESSAGE")
+                .map(|x| x.to_string_lossy().to_string())
+                .unwrap_or_else(|| format!("We panicked in {}!", fnname.as_ref()));
+            panic!("{}", message);
+        }
+    }
+}
+
 /// A dummy driver used for testing purposes.
 #[derive(Default)]
 pub struct DummyDriver {}
@@ -298,7 +310,10 @@ impl Connection for DummyConnection {
         Ok(())
     }
 
-    fn get_info(&self, _codes: Option<HashSet<InfoCode>>) -> Result<impl RecordBatchReader> {
+    fn get_info(
+        &self,
+        _codes: Option<HashSet<InfoCode>>,
+    ) -> Result<Box<dyn RecordBatchReader + Send + 'static>> {
         let string_value_array = StringArray::from(vec!["MyVendorName"]);
         let bool_value_array = BooleanArray::from(vec![true]);
         let int64_value_array = Int64Array::from(vec![42]);
@@ -357,6 +372,8 @@ impl Connection for DummyConnection {
             .collect::<ScalarBuffer<i32>>();
 
         let value_array = UnionArray::try_new(
+            #[allow(deprecated)]
+            // TODO: remove this once update the minimum arrow version to 57.2.0
             UnionFields::new(
                 [0, 1, 2, 3, 4, 5],
                 [
@@ -393,7 +410,7 @@ impl Connection for DummyConnection {
             vec![Arc::new(name_array), Arc::new(value_array)],
         )?;
         let reader = SingleBatchReader::new(batch);
-        Ok(reader)
+        Ok(Box::new(reader))
     }
 
     fn get_objects(
@@ -404,7 +421,7 @@ impl Connection for DummyConnection {
         _table_name: Option<&str>,
         _table_type: Option<Vec<&str>>,
         _column_name: Option<&str>,
-    ) -> Result<impl RecordBatchReader> {
+    ) -> Result<Box<dyn RecordBatchReader + Send + 'static>> {
         let constraint_column_usage_array_inner = StructArray::from(vec![
             (
                 Arc::new(Field::new("fk_catalog", DataType::Utf8, true)),
@@ -631,7 +648,7 @@ impl Connection for DummyConnection {
             ],
         )?;
         let reader = SingleBatchReader::new(batch);
-        Ok(reader)
+        Ok(Box::new(reader))
     }
 
     fn get_statistics(
@@ -640,7 +657,7 @@ impl Connection for DummyConnection {
         _db_schema: Option<&str>,
         _table_name: Option<&str>,
         _approximate: bool,
-    ) -> Result<impl RecordBatchReader> {
+    ) -> Result<Box<dyn RecordBatchReader + Send + 'static>> {
         let statistic_value_int64_array = Int64Array::from(Vec::<i64>::new());
         let statistic_value_uint64_array = UInt64Array::from(vec![42]);
         let statistic_value_float64_array = Float64Array::from(Vec::<f64>::new());
@@ -648,6 +665,8 @@ impl Connection for DummyConnection {
         let type_id_buffer = [1_i8].into_iter().collect::<ScalarBuffer<i8>>();
         let value_offsets_buffer = [0_i32].into_iter().collect::<ScalarBuffer<i32>>();
         let statistic_value_array = UnionArray::try_new(
+            #[allow(deprecated)]
+            // TODO: remove this once update the minimum arrow version to 57.2.0
             UnionFields::new(
                 [0, 1, 2, 3],
                 [
@@ -743,10 +762,10 @@ impl Connection for DummyConnection {
         )?;
 
         let reader = SingleBatchReader::new(batch);
-        Ok(reader)
+        Ok(Box::new(reader))
     }
 
-    fn get_statistic_names(&self) -> Result<impl RecordBatchReader> {
+    fn get_statistic_names(&self) -> Result<Box<dyn RecordBatchReader + Send + 'static>> {
         let name_array = StringArray::from(vec!["sum", "min", "max"]);
         let key_array = Int16Array::from(vec![0, 1, 2]);
         let batch = RecordBatch::try_new(
@@ -754,7 +773,7 @@ impl Connection for DummyConnection {
             vec![Arc::new(name_array), Arc::new(key_array)],
         )?;
         let reader = SingleBatchReader::new(batch);
-        Ok(reader)
+        Ok(Box::new(reader))
     }
 
     fn get_table_schema(
@@ -776,17 +795,20 @@ impl Connection for DummyConnection {
         }
     }
 
-    fn get_table_types(&self) -> Result<impl RecordBatchReader> {
+    fn get_table_types(&self) -> Result<Box<dyn RecordBatchReader + Send + 'static>> {
         let array = Arc::new(StringArray::from(vec!["table", "view"]));
         let batch = RecordBatch::try_new(schemas::GET_TABLE_TYPES_SCHEMA.clone(), vec![array])?;
         let reader = SingleBatchReader::new(batch);
-        Ok(reader)
+        Ok(Box::new(reader))
     }
 
-    fn read_partition(&self, _partition: impl AsRef<[u8]>) -> Result<impl RecordBatchReader> {
+    fn read_partition(
+        &self,
+        _partition: impl AsRef<[u8]>,
+    ) -> Result<Box<dyn RecordBatchReader + Send + 'static>> {
         let batch = get_table_data();
         let reader = SingleBatchReader::new(batch);
-        Ok(reader)
+        Ok(Box::new(reader))
     }
 
     fn rollback(&mut self) -> Result<()> {
@@ -836,10 +858,11 @@ impl Statement for DummyStatement {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<impl RecordBatchReader> {
+    fn execute(&mut self) -> Result<Box<dyn RecordBatchReader + Send + 'static>> {
+        maybe_panic("StatementExecuteQuery");
         let batch = get_table_data();
         let reader = SingleBatchReader::new(batch);
-        Ok(reader)
+        Ok(Box::new(reader))
     }
 
     fn execute_partitions(&mut self) -> Result<PartitionedResult> {
@@ -875,4 +898,10 @@ impl Statement for DummyStatement {
     }
 }
 
-adbc_ffi::export_driver!(DummyDriverInit, DummyDriver);
+impl Drop for DummyStatement {
+    fn drop(&mut self) {
+        maybe_panic("StatementClose");
+    }
+}
+
+adbc_ffi::export_driver!(AdbcDummyInit, DummyDriver);

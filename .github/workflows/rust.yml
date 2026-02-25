@@ -22,10 +22,12 @@ on:
     branches:
       - main
     paths:
+      - "c/**"
       - "rust/**"
       - ".github/workflows/rust.yml"
   push:
     paths:
+      - "c/**"
       - "rust/**"
       - ".github/workflows/rust.yml"
 
@@ -63,7 +65,7 @@ jobs:
       CARGO_INCREMENTAL: 0
       RUSTFLAGS: "-Adead_code" # TODO(alexandreyc): remove this line when implementation is complete
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -109,7 +111,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get install libsqlite3-dev
       - name: Setup conda
-        uses: conda-incubator/setup-miniconda@835234971496cad1653abb28a638a281cf32541f  # v3.2.0
+        uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
         if: runner.os == 'Windows'
         with:
           miniforge-version: latest

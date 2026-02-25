@@ -53,6 +53,48 @@ def test_conn_change_db_schema(postgres: dbapi.Connection) -> None:
     assert postgres.adbc_current_db_schema == "dbapischema"
 
 
+def test_get_objects_schema_filter_outside_search_path(
+    postgres: dbapi.Connection,
+) -> None:
+    schema_name = "dbapi_get_objects_test"
+    table_name = "schema_filter_table"
+
+    # Regression test: adbc_get_objects(db_schema_filter=...) should not depend on the
+    # connection's current schema/search_path.
+    assert postgres.adbc_current_db_schema == "public"
+
+    with postgres.cursor() as cur:
+        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
+        cur.execute(f'DROP TABLE IF EXISTS "{schema_name}"."{table_name}"')
+        cur.execute(f'CREATE TABLE "{schema_name}"."{table_name}" (ints INT)')
+    postgres.commit()
+
+    assert postgres.adbc_current_db_schema == "public"
+
+    metadata = (
+        postgres.adbc_get_objects(
+            depth="tables",
+            db_schema_filter=schema_name,
+            table_name_filter=table_name,
+        )
+        .read_all()
+        .to_pylist()
+    )
+
+    catalog_name = postgres.adbc_current_catalog
+    catalog = next(
+        (row for row in metadata if row["catalog_name"] == catalog_name), None
+    )
+    assert catalog is not None
+
+    schemas = catalog["catalog_db_schemas"]
+    assert len(schemas) == 1
+    assert schemas[0]["db_schema_name"] == schema_name
+    tables = schemas[0]["db_schema_tables"]
+    assert len(tables) == 1
+    assert tables[0]["table_name"] == table_name
+
+
 def test_conn_get_info(postgres: dbapi.Connection) -> None:
     info = postgres.adbc_get_info()
     assert info["driver_name"] == "ADBC PostgreSQL Driver"
@@ -515,3 +557,32 @@ def test_connect_conn_kwargs_db_schema(postgres_uri: str, postgres: dbapi.Connec
     with dbapi.connect(postgres_uri, conn_kwargs={schema_key: schema_name}) as conn:
         option_value = conn.adbc_connection.get_option(schema_key)
         assert option_value == schema_name
+
+
+def test_server_terminates_connection(postgres_uri: str) -> None:
+    """Test that driver handles server terminating the connection gracefully.
+
+    Reproduces: https://github.com/apache/arrow-adbc/issues/3878
+    When the server terminates a connection, the driver should return an error
+    instead of crashing with a segfault.
+    """
+    with dbapi.connect(postgres_uri) as conn1:
+        with dbapi.connect(postgres_uri) as conn2:
+            # Get the backend PID of conn2
+            with conn2.cursor() as cur:
+                cur.execute("SELECT pg_backend_pid()")
+                row = cur.fetchone()
+                assert row is not None
+                backend_pid = row[0]
+            conn2.commit()
+
+            # simulate a server side termination of a connection2
+            with conn1.cursor() as cur:
+                cur.execute(f"SELECT pg_terminate_backend({backend_pid})")
+            conn1.commit()
+
+            # Try to execute a query on the terminated connection
+            # This should raise an exception, NOT crash with a segfault
+            with pytest.raises(Exception):
+                with conn2.cursor() as cur:
+                    cur.execute("SELECT 1")
